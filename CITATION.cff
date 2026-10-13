@@ -7,6 +7,7 @@ abstract: >-
   signal processing, hemoglobin conversion, quality control, and group-level
   statistics.
 type: software
+doi: 10.5281/zenodo.23348858
 version: 1.2.0
 date-released: "2026-10-09"
 license: GPL-3.0-or-later
@@ -32,13 +33,13 @@ authors:
 # Additional code contributors to review and promote to authors as appropriate
 # (e.g. Pratusha Reddy, Lei Wang, Nicholas DeFilippis, Yigit Topoglu). Add full
 # names / affiliations / ORCIDs before release.
+identifiers:
+  - type: doi
+    value: 10.5281/zenodo.23348858
+    description: Zenodo concept DOI (resolves to the latest release)
 #
-# When a companion paper or archived release (e.g. Zenodo) is available, add a
-# DOI under `identifiers:` and a `preferred-citation:` block so tools cite the
-# paper rather than the software record. Example:
-# identifiers:
-#   - type: doi
-#     value: "10.5281/zenodo.XXXXXXX"
+# When a companion paper is published, add a `preferred-citation:` block so
+# tools cite the paper rather than the software record. Example:
 # preferred-citation:
 #   type: article
 #   title: "..."

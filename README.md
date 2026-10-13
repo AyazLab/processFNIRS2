@@ -3,6 +3,7 @@
 ![MATLAB](https://img.shields.io/badge/MATLAB-R2025b-blue.svg)
 ![License](https://img.shields.io/badge/license-GPLv3-blue.svg)
 ![Version](https://img.shields.io/badge/version-1.2.0-green.svg)
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.23348858.svg)](https://doi.org/10.5281/zenodo.23348858)
 
 A modular MATLAB toolbox for functional Near-Infrared Spectroscopy (fNIRS) data
 analysis — covering the full workflow from raw device import through signal
@@ -353,9 +354,12 @@ If you use processFNIRS2 in your research, please cite the software
 (machine-readable metadata is in [CITATION.cff](CITATION.cff)):
 
 > Curtin, A., & Ayaz, H. (2026). *processFNIRS2* (version 1.2.0)
-> [Computer software]. https://github.com/AyazLab/processFNIRS2
+> [Computer software]. Zenodo. https://doi.org/10.5281/zenodo.23348858
 
-A companion publication and archival DOI will be added here when available.
+The DOI above always resolves to the latest release. To cite the exact version
+you used, take that version's DOI from the
+[Zenodo record](https://doi.org/10.5281/zenodo.23348858). A companion
+publication will be added here when available.
 
 ## Contact
 For questions or support, contact Dr. Adrian Curtin at adrian.b.curtin@drexel.edu

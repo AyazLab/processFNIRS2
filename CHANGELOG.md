@@ -8,6 +8,10 @@ processFNIRS2 moves to the AyazLab organization.
 - The repository moved to the AyazLab organization: https://github.com/AyazLab/processFNIRS2. Old GitHub URLs redirect. The documentation site is now https://ayazlab.github.io/processFNIRS2/; the old `adriancurtin.github.io` address does not redirect.
 - `CITATION.cff`, the README citation, and the documentation links point at the new location.
 
+### Added
+
+- Zenodo archiving. The concept DOI [10.5281/zenodo.23348858](https://doi.org/10.5281/zenodo.23348858) is in `CITATION.cff` and the README citation.
+
 ## v1.1.2 (2026-10-09)
 Citation metadata ahead of Zenodo archiving.
 
