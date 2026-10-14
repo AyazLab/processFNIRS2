@@ -22,9 +22,11 @@ function info = runtime()
 %            version     - Version string from version()
 %            isOctave    - Logical scalar (see pf2_base.env.isOctave)
 %            missingPkgs - Cellstr of required-but-unavailable packages.
-%                          On Octave, checks the 'signal' package (provides
-%                          butter/filtfilt/pwelch). Empty on MATLAB or when
-%                          all required packages are present.
+%                          On Octave, checks 'datatypes' (table/datetime/
+%                          categorical/string), 'signal' (pwelch and other
+%                          spectral estimators), and 'statistics' (nan*
+%                          reductions). Empty on MATLAB or when all
+%                          required packages are present.
 %
 % Example:
 %   r = pf2_base.env.runtime();
@@ -44,7 +46,7 @@ function info = runtime()
     if info.isOctave
         info.name = 'Octave';
         % Packages the headless processing path depends on.
-        required = {'signal'};
+        required = {'datatypes', 'signal', 'statistics'};
         for k = 1:numel(required)
             if ~localHasOctavePackage(required{k})
                 info.missingPkgs{end+1} = required{k};

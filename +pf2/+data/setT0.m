@@ -122,7 +122,7 @@ if(isfield(outFNIR,'raw'))
 end
 
 if(pf2_base.isnestedfield(outFNIR,'Aux')) && ~isempty(outFNIR.Aux)
-    auxFields=fields(outFNIR.Aux);
+    auxFields=fieldnames(outFNIR.Aux);
     % Skip known time fields that are handled separately below
     timeFieldNames = {'t', 'time', 'Time', 'elapsedTime'};
     for f=1:length(auxFields)

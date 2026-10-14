@@ -371,7 +371,7 @@ end
 
 validFields=pf2_base.pf2_getFNIRSfields();
 
-fdataFields=fields(fNIR);  % Copy known fields
+fdataFields=fieldnames(fNIR);  % Copy known fields
 for i=1:length(fdataFields)
    memberIdx=ismember(validFields,fdataFields{i});
    if(any(memberIdx)&&~strcmp(fdataFields{i},'time')&&~strcmp(fdataFields{i},'ROI')&&~isfield(outfNIR,fdataFields{i}))
@@ -390,7 +390,7 @@ if(isfield(outfNIR,'Aux')&&splitAux)
         validTimeFields={'time','t','Time','elapsedTime'};
     
         if(outfNIR.Aux.flattened)
-            auxTrimFields=fields(outfNIR.Aux);
+            auxTrimFields=fieldnames(outfNIR.Aux);
     
             for atIdx=1:length(auxTrimFields)
                 curVar=outfNIR.Aux.(auxTrimFields{atIdx});
@@ -469,7 +469,7 @@ end
 end
 
 function [outAuxStruct] = recursiveAuxFlatten(aux_in,nir_time,parent_time_in)
-    auxFields=fields(aux_in);
+    auxFields=fieldnames(aux_in);
 
     if(nargin<3)
         parent_time_in=[];
@@ -716,7 +716,7 @@ function [outAuxStruct] = recursiveAuxFlatten(aux_in,nir_time,parent_time_in)
             
             struct2unpack=recursiveAuxFlatten(aux_in.(curFieldName),nir_time,local_time);
 
-            fields2assign=fields(struct2unpack);
+            fields2assign=fieldnames(struct2unpack);
             for f2=1:length(fields2assign) 
                 subFieldName=fields2assign{f2};
                 newFieldName=sprintf('%s_%s',curFieldName,subFieldName);

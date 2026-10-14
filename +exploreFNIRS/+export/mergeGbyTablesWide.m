@@ -185,7 +185,7 @@ for g=1:length(gbyTables)
      if(exportAux&&isfield(curBarGA,'Aux'))
          %warning('To-do add AUX fields to export wide'); % trouble is syncing up timing between each
          
-         curAuxFields=fields(curBarGA.Aux);
+         curAuxFields=fieldnames(curBarGA.Aux);
          for aux=1:length(curAuxFields)
             curAuxName=curAuxFields{aux};
             curAux= curBarGA.Aux.(curAuxName);

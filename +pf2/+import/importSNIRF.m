@@ -980,7 +980,7 @@ end
 
 function outTable = struct2table(structObj)
     % Convert structure array to table
-    fieldsInStruct = fields(structObj(1));
+    fieldsInStruct = fieldnames(structObj(1));
    
     outTable = table();
     for n = 1:length(structObj)
@@ -1005,7 +1005,7 @@ end
 
 function outStruct = stripStruct(structObj)
     % Clean up metadata structure by removing null characters and whitespace
-    fieldsInStruct = fields(structObj);
+    fieldsInStruct = fieldnames(structObj);
 
     outStruct = structObj;
 

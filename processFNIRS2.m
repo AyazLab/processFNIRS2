@@ -583,7 +583,7 @@ if(isstruct(data)) %treat as fNIR struct
     end
 
     
-    dataFields=fields(data);  % copy bio marker fields
+    dataFields=fieldnames(data);  % copy bio marker fields
     for i=1:length(dataFields)
         curField=dataFields{i};
        for j=1:length(validBioFields)
@@ -661,7 +661,7 @@ end
 % Thread the device locally. On the context path (useContext) globals are
 % left untouched; on the legacy path procDevice mirrors setF.device and the
 % globals are updated as before for backward compatibility.
-[fData, procDevice]=updateCurrentDevice(fData, procDevice, useContext);
+[fData, procDevice]=updateCurrentDevice_local(fData, procDevice, useContext);
 
 [numDataRows,numDataCols]=size(fData.stage{1});
 
@@ -799,7 +799,7 @@ if(~isempty(data))
 end
 
 if(nargout>0)
-    fdataFields=fields(fData);
+    fdataFields=fieldnames(fData);
     for i=1:length(fdataFields)
        memberIdx=ismember(validFields,fdataFields{i});
        if(any(memberIdx))
@@ -811,7 +811,7 @@ if(nargout>0)
     
    if(isfield(fData,'stage')&&(size(fData.stage,2)==5))
        if(outputData.ProcessOxy&&~isempty(fData.stage{5}))
-           stage5fields=fields(fData.stage{5});
+           stage5fields=fieldnames(fData.stage{5});
             for i=1:length(stage5fields)
                 outfNIR.(stage5fields{i})=fData.stage{5}.(stage5fields{i});
             end
@@ -915,8 +915,8 @@ end
 
 % UIWAIT makes processFNIRS2 wait for user response (see UIRESUME)
 % uiwait(handles.figure1);
-function [fData, device]=updateCurrentDevice(fData, device, isolated)
-% UPDATECURRENTDEVICE Build merged probe tables and resolve timing.
+function [fData, device]=updateCurrentDevice_local(fData, device, isolated)
+% UPDATECURRENTDEVICE_LOCAL Build merged probe tables and resolve timing.
 %
 % Threads the device locally. When ISOLATED is true (a ProcessingContext is
 % in play) the global PF2/setF caches are NOT written, keeping context-based

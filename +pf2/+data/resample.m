@@ -404,7 +404,7 @@ for b = 1:length(bioMlist)
     end
 end
 
-if(isfield(fNIR,'Aux')&&~isempty(fNIR.Aux)&&length(fields(fNIR.Aux))>1)
+if(isfield(fNIR,'Aux')&&~isempty(fNIR.Aux)&&length(fieldnames(fNIR.Aux))>1)
     if(averageAux)
         % Attempts to resample any field (and align with fNIRS)
             % criteria:
@@ -437,7 +437,7 @@ if(isfield(fNIR,'Aux')&&~isempty(fNIR.Aux)&&length(fields(fNIR.Aux))>1)
         validTimeFields={'time','t','Time'};
     
         if(outFNIR.Aux.flattened)
-            auxTrimFields=fields(outFNIR.Aux);
+            auxTrimFields=fieldnames(outFNIR.Aux);
     
             for atIdx=1:length(auxTrimFields)
                 curVar=outFNIR.Aux.(auxTrimFields{atIdx});
@@ -462,7 +462,7 @@ end
 
 
 validFields=pf2_base.pf2_getFNIRSfields();
-fdataFields=fields(fNIR);  % Copy known fields
+fdataFields=fieldnames(fNIR);  % Copy known fields
 for fieldIdx=1:length(fdataFields)
    memberIdx=ismember(validFields,fdataFields{fieldIdx});
    if(any(memberIdx)&&~strcmp(fdataFields{fieldIdx},'time')...
@@ -519,7 +519,7 @@ end
 end
 
 function [outAuxStruct] = recursiveAuxResample(aux_in,flattenAux,segLength,centerOnTime,nir_time,fTimeInd,nanRejectionLevel,parent_time_in,parentTimeInd)
-    auxFields=fields(aux_in);
+    auxFields=fieldnames(aux_in);
 
     if(nargin<8)
         parent_time_in=[];
@@ -863,7 +863,7 @@ function [outAuxStruct] = recursiveAuxResample(aux_in,flattenAux,segLength,cente
             else
                 struct2unpack=recursiveAuxResample(aux_in.(curFieldName),true,segLength,centerOnTime,nir_time,fTimeInd,nanRejectionLevel,local_time,localTimeInd);
 
-                fields2assign=fields(struct2unpack);
+                fields2assign=fieldnames(struct2unpack);
                 for f2=1:length(fields2assign) 
                     subFieldName=fields2assign{f2};
                     newFieldName=sprintf('%s_%s',curFieldName,subFieldName);
@@ -880,7 +880,7 @@ function [outAuxStruct] = recursiveAuxResample(aux_in,flattenAux,segLength,cente
 end
 
 function [outAuxStruct] = recursiveAuxFlatten(aux_in,nir_time,parent_time_in)
-    auxFields=fields(aux_in);
+    auxFields=fieldnames(aux_in);
 
     if(nargin<3)
         parent_time_in=[];
@@ -1113,7 +1113,7 @@ function [outAuxStruct] = recursiveAuxFlatten(aux_in,nir_time,parent_time_in)
             
             struct2unpack=recursiveAuxFlatten(aux_in.(curFieldName),nir_time,local_time);
 
-            fields2assign=fields(struct2unpack);
+            fields2assign=fieldnames(struct2unpack);
             for f2=1:length(fields2assign) 
                 subFieldName=fields2assign{f2};
                 newFieldName=sprintf('%s_%s',curFieldName,subFieldName);

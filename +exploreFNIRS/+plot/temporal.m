@@ -366,7 +366,7 @@ for chIdx=1:numOpt
                                 
                                else
                                      dataTime=data2plot.(bioM).time;
-                                     varNames=fields(data2plot.(bioM));
+                                     varNames=fieldnames(data2plot.(bioM));
                                      timeIdx=ismember(varNames,'time');
                                      firstVar=find(~timeIdx);
                                      data2plot.(bioM)=data2plot.(bioM).(varNames{firstVar(1)});

@@ -198,7 +198,7 @@ for n = 1:numNIRS
     end
 
     % Add probe metadata to general metadata
-    probeFields = fields(probeMetaData);
+    probeFields = fieldnames(probeMetaData);
     for p = 1:length(probeFields)
         metaDataTags.(probeFields{p}) = probeMetaData.(probeFields{p});
     end
@@ -636,7 +636,7 @@ function metaData = info2meta(nirStruct)
     end
     
     % Copy all relevant info fields
-    infoFields = fields(info);
+    infoFields = fieldnames(info);
     for i = 1:length(infoFields)
         fieldName = infoFields{i};
         fieldValue = info.(fieldName);

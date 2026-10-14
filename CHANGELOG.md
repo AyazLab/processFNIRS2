@@ -1,5 +1,27 @@
 # Changelog
 
+## Unreleased
+Groundwork for running headless single-subject processing under GNU Octave.
+
+### Added
+
+- `pf2_base.env.ensureOctaveCompat` loads the Octave `datatypes`, `signal` and `statistics` packages and adds `compat_shims/octave` (`contains`, `strip`, `strlength`, `extractAfter`, `extractBefore`, `isStringScalar`, two-argument `round`). It runs automatically at the importer, device-loading and initialization entry points and does nothing under MATLAB.
+- `pf2_base.env.runtime` now reports missing `datatypes` and `statistics` packages as well as `signal`.
+
+### Changed
+
+- `pf2_base.external.INI` no longer derives from `dynamicprops`. Sections are held in a private struct and reached through overloaded indexing, so `cfg.<Section>`, `get`, `add`, `remove`, `read` and `write` behave as before. INI objects saved by earlier versions re-read their sections from `File` on load, and warn if that file is gone.
+- `pf2_base.fnirs.processStageOD2Hb` parses its name-value options with `inputParser` instead of an `arguments` block.
+
+### Fixes
+
+- `loadDeviceCfg` and `pf2_base.gui.updateCurrentDevice` assign whole table columns instead of growing them by indexed assignment, and no longer call `sprintf` on a categorical or `nansum` on a logical.
+- `bvoxy` declares its positional `coefs` and `isOD` options before its name-value parameters. Argument handling under MATLAB is unchanged.
+- Calls to the undocumented `fields` alias use `fieldnames`.
+- `pf2.Device` and `pf2_base.PipelineFunction` properties use `SetAccess = private` instead of `immutable`, which Octave does not support. They remain read-only outside the class.
+- `processFNIRS2`'s local device helper is renamed so Octave resolves the call to `pf2_base.gui.updateCurrentDevice` instead of recursing into the local function.
+- Removed a stray editor temporary file (`+pf2_base/+external/.!36603!INI.m`).
+
 ## v1.2.0 (2026-10-09)
 processFNIRS2 moves to the AyazLab organization.
 

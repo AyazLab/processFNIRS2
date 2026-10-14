@@ -1,4 +1,4 @@
-classdef INI < dynamicprops
+classdef INI < handle
 % INI Reader/writer for INI-style configuration files.
 %
 % Summary:
@@ -8,8 +8,9 @@ classdef INI < dynamicprops
 %       key = value
 %       ; a comment
 %
-%   Each section is exposed as a dynamic property on the object whose value
-%   is a struct of that section's key/value pairs. Values are stored as
+%   Each section is exposed as a property-style field on the object
+%   (obj.<Section>) whose value is a struct of that section's key/value
+%   pairs. Values are stored as
 %   evaluable MATLAB literals on write (numbers, strings, cells, structs,
 %   matrices) and recovered on read by evaluating the right-hand side, with
 %   a fall-back to the raw string when evaluation fails. This makes the
@@ -17,10 +18,15 @@ classdef INI < dynamicprops
 %   round-tripping packed processing-method structs.
 %
 %   Sections are tracked by their original (human-readable) names in the
-%   Sections property; the corresponding dynamic property uses a sanitized,
+%   Sections property; the corresponding field uses a sanitized,
 %   MATLAB-valid identifier derived from that name. Reading/writing/lookup
 %   accept the original name and resolve to the sanitized property
 %   internally, so callers may use either form.
+%
+%   Section data lives in a private struct and is reached through overloaded
+%   subsref/subsasgn rather than dynamicprops, so the class also runs under
+%   GNU Octave (which lacks dynamicprops). Objects saved by the earlier
+%   dynamicprops implementation are rebuilt by loadobj.
 %
 % Inputs (constructor, name/value pairs):
 %   'File'        - char/string. Path of the file to read/write. Default 'INI.ini'.
@@ -64,6 +70,8 @@ classdef INI < dynamicprops
         % Map from sanitized property name -> original section name. Lets
         % write() and lookups recover the human-readable header.
         PropToSection = struct();
+        % Section data keyed by sanitized property name.
+        Data = struct();
     end
 
     methods
@@ -84,7 +92,11 @@ classdef INI < dynamicprops
                     error('pf2_base:external:INI:badProperty', ...
                         'Property "%s" not supported.', name);
                 end
-                obj.(prop) = value;
+                if obj.isFixed(prop)
+                    obj.(prop) = value;
+                else
+                    obj.Data.(prop) = value;
+                end
             end
         end
 
@@ -100,11 +112,15 @@ classdef INI < dynamicprops
                 error('pf2_base:external:INI:badProperty', ...
                     'Property "%s" not supported.', name);
             end
-            value = obj.(prop);
+            if obj.isFixed(prop)
+                value = obj.(prop);
+            else
+                value = obj.Data.(prop);
+            end
         end
 
         function obj = read(obj, varargin)
-            % Read an INI file into per-section dynamic properties.
+            % Read an INI file into per-section fields.
             if nargin >= 2 && ~isempty(varargin{1})
                 obj.File = varargin{1};
             end
@@ -135,7 +151,7 @@ classdef INI < dynamicprops
                     end
                     % Commit the previous section before starting a new one.
                     if ~isempty(currentSection)
-                        obj.(currentSection) = data;
+                        obj.Data.(currentSection) = data;
                     end
                     sectionName    = strtrim(line(2:close(1)-1));
                     currentSection = obj.ensureSection(sectionName);
@@ -178,7 +194,7 @@ classdef INI < dynamicprops
             end
 
             if ~isempty(currentSection)
-                obj.(currentSection) = data;
+                obj.Data.(currentSection) = data;
             end
 
             obj.Sections = sort(obj.Sections);
@@ -202,10 +218,10 @@ classdef INI < dynamicprops
             for s = 1:numel(obj.Sections)
                 sectionName = obj.Sections{s};
                 prop        = obj.sectionProperty(sectionName);
-                if isempty(prop) || ~isprop(obj, prop)
+                if isempty(prop) || ~obj.hasProp(prop)
                     continue;
                 end
-                value = obj.(prop);
+                value = obj.Data.(prop);
                 value = pf2_base.external.INI.coerceToStruct(value);
 
                 fprintf(fid, '[%s]%s', sectionName, obj.NewLineChar);
@@ -229,7 +245,7 @@ classdef INI < dynamicprops
                 sectionName = varargin{k};
                 value       = varargin{k+1};
                 prop        = obj.ensureSection(sectionName);
-                obj.(prop)  = value;
+                obj.Data.(prop)  = value;
             end
             obj.Sections = sort(obj.Sections);
         end
@@ -249,9 +265,141 @@ classdef INI < dynamicprops
             end
         end
 
+
+        function tf = isprop(obj, name)
+            % True for the fixed properties and for registered sections.
+            tf = obj.hasProp(name);
+        end
+
+        function varargout = subsref(obj, s)
+            % obj.<Section>[...] reads section data; everything else
+            % (fixed properties, method calls) uses built-in indexing.
+            if strcmp(s(1).type, '.') && ischar(s(1).subs) && isfield(obj.Data, s(1).subs)
+                value = obj.Data.(s(1).subs);
+                if numel(s) > 1
+                    [varargout{1:nargout}] = subsref(value, s(2:end));
+                else
+                    varargout = {value};
+                end
+            else
+                [varargout{1:nargout}] = builtin('subsref', obj, s);
+            end
+        end
+
+        function obj = subsasgn(obj, s, value)
+            % obj.<Section>[...] = V writes into an existing section.
+            if strcmp(s(1).type, '.') && ischar(s(1).subs) && isfield(obj.Data, s(1).subs)
+                if numel(s) > 1
+                    value = subsasgn(obj.Data.(s(1).subs), s(2:end), value);
+                end
+                obj.Data.(s(1).subs) = value;
+            else
+                obj = builtin('subsasgn', obj, s, value);
+            end
+        end
+
+        function n = numArgumentsFromSubscript(obj, s, context)
+            % Section and property reads return a single value unless
+            % trailing brace indexing expands to a comma-separated list.
+            isDot = strcmp(s(1).type, '.') && ischar(s(1).subs);
+            if isDot && isfield(obj.Data, s(1).subs)
+                base = obj.Data.(s(1).subs);
+            elseif ~pf2_base.env.isOctave()
+                n = builtin('numArgumentsFromSubscript', obj, s, context);
+                return;
+            elseif isDot && obj.isFixed(s(1).subs)
+                % Octave has no built-in to defer to; every public method
+                % returns one value, so only brace reads need counting.
+                base = obj.(s(1).subs);
+            else
+                n = 1;
+                return;
+            end
+            n = 1;
+            if numel(s) > 1 && strcmp(s(end).type, '{}')
+                if numel(s) > 2
+                    base = subsref(base, s(2:end-1));
+                end
+                n = numel(base(s(end).subs{:}));
+            end
+        end
+
+    end
+
+    methods (Static)
+
+        function obj = loadobj(s)
+            % Rebuild objects saved by the dynamicprops implementation,
+            % whose sections were stored as dynamic properties. MATLAB
+            % drops those values when loading into this class, so the
+            % sections are re-read from File when it is still available.
+            if isa(s, 'pf2_base.external.INI')
+                obj = s;
+                obj.restoreMissingSections();
+                return;
+            end
+            obj = pf2_base.external.INI();
+            fixed = {'File', 'CommentChar', 'NewLineChar', 'Sections'};
+            for k = 1:numel(fixed)
+                if isfield(s, fixed{k})
+                    obj.(fixed{k}) = s.(fixed{k});
+                end
+            end
+            if isfield(s, 'PropToSection') && isstruct(s.PropToSection)
+                obj.PropToSection = s.PropToSection;
+            end
+            if isfield(s, 'Data') && isstruct(s.Data)
+                obj.Data = s.Data;
+            end
+            mapFields = fieldnames(obj.PropToSection);
+            for k = 1:numel(mapFields)
+                if isfield(s, mapFields{k})
+                    obj.Data.(mapFields{k}) = s.(mapFields{k});
+                end
+            end
+            obj.restoreMissingSections();
+        end
+
     end
 
     methods (Access = private)
+
+        function tf = isFixed(~, name)
+            % True for the class's own (non-section) property names.
+            tf = any(strcmp(name, {'File', 'CommentChar', 'NewLineChar', ...
+                'Sections', 'PropToSection', 'Data'}));
+        end
+
+        function tf = hasProp(obj, name)
+            % True for a fixed property or a registered section field.
+            tf = obj.isFixed(name) || isfield(obj.Data, name);
+        end
+
+        function restoreMissingSections(obj)
+            % Re-read File when registered sections have no data (an object
+            % saved by the dynamicprops implementation). If the file is
+            % gone, drop the dangling registrations so Sections stays
+            % consistent with the data actually held.
+            mapFields = fieldnames(obj.PropToSection);
+            missing = mapFields(~isfield(obj.Data, mapFields));
+            if isempty(missing)
+                return;
+            end
+            if exist(obj.File, 'file') == 2
+                try
+                    obj.read();
+                    return;
+                catch
+                    % Fall through and prune.
+                end
+            end
+            for k = 1:numel(missing)
+                obj.dropSectionByProperty(missing{k});
+            end
+            warning('pf2_base:external:INI:sectionsNotRestored', ...
+                ['Section data from a saved INI object could not be ' ...
+                 'restored because "%s" is unavailable.'], obj.File);
+        end
 
         function prop = resolveProperty(obj, name)
             % Resolve a user-supplied name to an existing property name,
@@ -266,18 +414,18 @@ classdef INI < dynamicprops
             end
             % Original section name?
             secProp = obj.sectionProperty(name);
-            if ~isempty(secProp) && isprop(obj, secProp)
+            if ~isempty(secProp) && obj.hasProp(secProp)
                 prop = secProp;
                 return;
             end
             % Already a valid dynamic property name?
-            if isprop(obj, name)
+            if obj.hasProp(name)
                 prop = name;
                 return;
             end
             % Sanitized form of an arbitrary name.
             cand = pf2_base.external.INI.sanitizeName(name);
-            if ~isempty(cand) && isprop(obj, cand)
+            if ~isempty(cand) && obj.hasProp(cand)
                 prop = cand;
             end
         end
@@ -297,9 +445,9 @@ classdef INI < dynamicprops
 
         function prop = ensureSection(obj, sectionName)
             % Register a section by its original name, creating the backing
-            % dynamic property if needed, and return the property name.
+            % field if needed, and return the property name.
             prop = obj.sectionProperty(sectionName);
-            if ~isempty(prop) && isprop(obj, prop)
+            if ~isempty(prop) && obj.hasProp(prop)
                 return;
             end
             prop = pf2_base.external.INI.sanitizeName(sectionName);
@@ -307,12 +455,11 @@ classdef INI < dynamicprops
                 prop = 'Section';
             end
             % Avoid collision with the fixed properties.
-            while any(strcmp(prop, {'File', 'CommentChar', 'NewLineChar', ...
-                    'Sections', 'PropToSection'}))
+            while obj.isFixed(prop)
                 prop = ['x_' prop]; %#ok<AGROW>
             end
-            if ~isprop(obj, prop)
-                obj.addprop(prop);
+            if ~isfield(obj.Data, prop)
+                obj.Data.(prop) = [];
             end
             obj.PropToSection.(prop) = sectionName;
             if ~ismember(sectionName, obj.Sections)
@@ -321,14 +468,8 @@ classdef INI < dynamicprops
         end
 
         function clearSections(obj)
-            % Delete all dynamic section properties and reset tracking.
-            mapFields = fieldnames(obj.PropToSection);
-            for k = 1:numel(mapFields)
-                p = findprop(obj, mapFields{k});
-                if ~isempty(p)
-                    delete(p);
-                end
-            end
+            % Delete all section data and reset tracking.
+            obj.Data = struct();
             obj.PropToSection = struct();
             obj.Sections = {};
         end
@@ -340,9 +481,8 @@ classdef INI < dynamicprops
                 obj.Sections(strcmp(obj.Sections, sectionName)) = [];
                 obj.PropToSection = rmfield(obj.PropToSection, prop);
             end
-            p = findprop(obj, prop);
-            if ~isempty(p)
-                delete(p);
+            if isfield(obj.Data, prop)
+                obj.Data = rmfield(obj.Data, prop);
             end
         end
 

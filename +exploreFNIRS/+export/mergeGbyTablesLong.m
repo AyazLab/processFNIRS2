@@ -190,7 +190,7 @@ for g=1:length(gbyTables)
         end
 
         if(exportAux&&isfield(curBarGA,'Aux'))
-             curAuxFields=fields(curBarGA.Aux);
+             curAuxFields=fieldnames(curBarGA.Aux);
              for aux=1:length(curAuxFields)
                 curAuxName=curAuxFields{aux};
                 curAux= curBarGA.Aux.(curAuxName);

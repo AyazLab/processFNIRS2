@@ -68,7 +68,7 @@ classdef PipelineFunction
 %
 % See also: pf2_base.pf2_unpackMethod, pf2_base.fnirs.processStageRaw2OD
 
-    properties (SetAccess = immutable)
+    properties (SetAccess = private)
         funcName          char
         funcHandle        function_handle
         name              char
