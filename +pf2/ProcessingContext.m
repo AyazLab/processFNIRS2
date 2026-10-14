@@ -63,6 +63,11 @@ classdef ProcessingContext < pf2_base.ProcessingContext
             % then applies any Name-Value settings.
 
             obj@pf2_base.ProcessingContext();
+            % copy() constructs with COPY_TOKEN and then overwrites every
+            % property, so skip loading the method libraries.
+            if nargin == 1 && isequal(varargin{1}, pf2_base.ProcessingContext.COPY_TOKEN)
+                return;
+            end
             obj.loadMethods();
             if nargin > 0
                 obj.configure(varargin{:});

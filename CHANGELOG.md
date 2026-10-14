@@ -12,6 +12,8 @@ Groundwork for running headless single-subject processing under GNU Octave.
 
 - `pf2_base.external.INI` no longer derives from `dynamicprops`. Sections are held in a private struct and reached through overloaded indexing, so `cfg.<Section>`, `get`, `add`, `remove`, `read` and `write` behave as before. INI objects saved by earlier versions re-read their sections from `File` on load, and warn if that file is gone.
 - `pf2_base.fnirs.processStageOD2Hb` parses its name-value options with `inputParser` instead of an `arguments` block.
+- `pf2_base.ProcessingContext`, `pf2_base.Pipeline` and `pf2_base.PipelineFunction` declare properties without inline types or validators, which Octave cannot parse. Set methods on `ProcessingContext` and `Pipeline` apply the same coercion and validation, with the same MATLAB error identifiers. Under MATLAB, property values, classes and errors are unchanged.
+- `ProcessingContext` derives from `handle` and implements `copy()` itself instead of inheriting `matlab.mixin.Copyable`. `copy()` still returns an independent shallow copy of the same class, including `pf2.ProcessingContext` and `pf2_base.GUIContext`, without reloading the method libraries.
 
 ### Fixes
 
@@ -20,6 +22,7 @@ Groundwork for running headless single-subject processing under GNU Octave.
 - Calls to the undocumented `fields` alias use `fieldnames`.
 - `pf2.Device` and `pf2_base.PipelineFunction` properties use `SetAccess = private` instead of `immutable`, which Octave does not support. They remain read-only outside the class.
 - `processFNIRS2`'s local device helper is renamed so Octave resolves the call to `pf2_base.gui.updateCurrentDevice` instead of recursing into the local function.
+- `pf2_initialize` adds the toolbox subfolders by absolute path. Octave stored the relative entries verbatim, so they stopped resolving after the working folder changed.
 - Removed a stray editor temporary file (`+pf2_base/+external/.!36603!INI.m`).
 
 ## v1.2.0 (2026-10-09)

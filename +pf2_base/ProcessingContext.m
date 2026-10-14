@@ -1,4 +1,4 @@
-classdef ProcessingContext < matlab.mixin.Copyable
+classdef ProcessingContext < handle
     % PROCESSINGCONTEXT Encapsulates all processing settings for fNIRS analysis
     %
     % ProcessingContext provides an alternative to global variables (PF2, setF)
@@ -83,13 +83,26 @@ classdef ProcessingContext < matlab.mixin.Copyable
     %   ctx = ProcessingContext.fromGlobals();
     %   save('analysis_settings.mat', 'ctx');
     %
+    % Property types and validators are enforced by set methods rather than
+    % inline declarations (e.g. 'dpfMode (1,:) char {mustBeMember(...)}'),
+    % and copy() is implemented here rather than inherited from
+    % matlab.mixin.Copyable, so the class also parses under GNU Octave.
+    % Values are coerced and validated exactly as the inline form did,
+    % including MATLAB's error identifiers.
+    %
     % See also: processFNIRS2, pf2_base.pf2_initialize
+
+    properties (Constant, Hidden)
+        % Passed to a subclass constructor by copy() to skip any expensive
+        % initialization; the copy's properties are overwritten afterwards.
+        COPY_TOKEN = '__pf2_ProcessingContext_copy__'
+    end
 
     properties
         % DPF (Differential Pathlength Factor) settings
-        dpfMode (1,:) char {mustBeMember(dpfMode, {'None', 'Fixed', 'Calc', 'PPF'})} = 'Calc'
-        dpfFixedValue (1,1) double {mustBePositive} = 5.93
-        subjectAge (1,1) double {mustBePositive} = 25
+        dpfMode = 'Calc'           % 'None' | 'Fixed' | 'Calc' | 'PPF'
+        dpfFixedValue = 5.93       % positive scalar
+        subjectAge = 25            % positive scalar
 
         % Partial-volume correction applied to the fixed or age-calculated DPF:
         % L = SD.*DPF./pvc. Empty means 1 (no correction). A scalar or per-optode
@@ -100,45 +113,46 @@ classdef ProcessingContext < matlab.mixin.Copyable
 
         % Complete effective pathlength factor (escape hatch), used when
         % dpfMode == 'PPF': L = SD.*ppf, with no DPF/PVC. Scalar or [ppf1 ppf2].
-        ppf (1,:) double = []
+        ppf = zeros(1, 0)          % double row
 
         % Baseline settings
-        baselineStartTime (1,1) double = 0
-        baselineLength (1,1) double {mustBeNonnegative} = 10
-        useAbsoluteTime (1,1) logical = false
-        windowStartTime (1,1) double = 0
-        dirtyBaseline (1,1) logical = false
+        baselineStartTime = 0      % scalar
+        baselineLength = 10        % non-negative scalar
+        useAbsoluteTime = false    % logical scalar
+        windowStartTime = 0        % scalar
+        dirtyBaseline = false      % logical scalar
 
         % Method configuration
-        rawMethodName (1,:) char = 'None'
-        rawMethod struct = struct()
-        oxyMethodName (1,:) char = 'None'
-        oxyMethod struct = struct()
+        rawMethodName = 'None'     % char row
+        rawMethod = struct()
+        oxyMethodName = 'None'     % char row
+        oxyMethod = struct()
 
         % Method libraries (loaded from config files)
-        rawMethodsLib struct = struct()
-        oxyMethodsLib struct = struct()
+        rawMethodsLib = struct()
+        oxyMethodsLib = struct()
 
         % Device configuration
-        device struct = struct()
+        device = struct()
 
         % Quality control
-        rejectLevel (1,1) double {mustBeInRange(rejectLevel, 0, 1)} = 0
-        processRejected (1,1) logical = false
+        rejectLevel = 0            % scalar in [0, 1]
+        processRejected = false    % logical scalar
 
         % Output options
-        outputLegacyMarkers (1,1) logical = false
+        outputLegacyMarkers = false  % logical scalar
 
         % Paths
-        rootPath (1,:) char = ''
+        rootPath = ''              % char row
     end
 
     methods
-        function obj = ProcessingContext()
+        function obj = ProcessingContext(varargin)
             % PROCESSINGCONTEXT Create a new processing context with defaults
             %
             % The context is initialized with sensible defaults. Use
             % fromGlobals() to create a context matching current global state.
+            % Any input (copy() passes COPY_TOKEN) is ignored here.
 
             obj.rootPath = pf2_base.pf2_defaultRootPath();
         end
@@ -229,6 +243,115 @@ classdef ProcessingContext < matlab.mixin.Copyable
         %       c.subjectAge = ages(i);
         %       out{i} = processFNIRS2(data{i}, 'Context', c);
         %   end
+
+        function c = copy(obj)
+            % COPY Independent shallow copy of the context
+            %
+            % Returns a new context of the same class with every property
+            % copied (handle-valued contents are shared, as with
+            % matlab.mixin.Copyable). Use one copy per parfor iteration;
+            % plain assignment aliases the same handle.
+            %
+            % Syntax:
+            %   c = ctx.copy();
+
+            c = feval(class(obj), pf2_base.ProcessingContext.COPY_TOKEN);
+            props = properties(obj);
+            props = props(~strcmp(props, 'COPY_TOKEN'));
+            for k = 1:numel(props)
+                c.(props{k}) = obj.(props{k});
+            end
+        end
+
+        function obj = set.dpfMode(obj, v)
+            v = pf2_base.ProcessingContext.asCharRow(v);
+            mustBeMember(v, {'None', 'Fixed', 'Calc', 'PPF'});
+            obj.dpfMode = v;
+        end
+
+        function obj = set.dpfFixedValue(obj, v)
+            v = pf2_base.ProcessingContext.asScalarDouble(v);
+            mustBePositive(v);
+            obj.dpfFixedValue = v;
+        end
+
+        function obj = set.subjectAge(obj, v)
+            v = pf2_base.ProcessingContext.asScalarDouble(v);
+            mustBePositive(v);
+            obj.subjectAge = v;
+        end
+
+        function obj = set.ppf(obj, v)
+            obj.ppf = pf2_base.ProcessingContext.asDoubleRow(v);
+        end
+
+        function obj = set.baselineStartTime(obj, v)
+            obj.baselineStartTime = pf2_base.ProcessingContext.asScalarDouble(v);
+        end
+
+        function obj = set.baselineLength(obj, v)
+            v = pf2_base.ProcessingContext.asScalarDouble(v);
+            mustBeNonnegative(v);
+            obj.baselineLength = v;
+        end
+
+        function obj = set.useAbsoluteTime(obj, v)
+            obj.useAbsoluteTime = pf2_base.ProcessingContext.asScalarLogical(v);
+        end
+
+        function obj = set.windowStartTime(obj, v)
+            obj.windowStartTime = pf2_base.ProcessingContext.asScalarDouble(v);
+        end
+
+        function obj = set.dirtyBaseline(obj, v)
+            obj.dirtyBaseline = pf2_base.ProcessingContext.asScalarLogical(v);
+        end
+
+        function obj = set.rawMethodName(obj, v)
+            obj.rawMethodName = pf2_base.ProcessingContext.asCharRow(v);
+        end
+
+        function obj = set.rawMethod(obj, v)
+            obj.rawMethod = pf2_base.ProcessingContext.asStruct(v);
+        end
+
+        function obj = set.oxyMethodName(obj, v)
+            obj.oxyMethodName = pf2_base.ProcessingContext.asCharRow(v);
+        end
+
+        function obj = set.oxyMethod(obj, v)
+            obj.oxyMethod = pf2_base.ProcessingContext.asStruct(v);
+        end
+
+        function obj = set.rawMethodsLib(obj, v)
+            obj.rawMethodsLib = pf2_base.ProcessingContext.asStruct(v);
+        end
+
+        function obj = set.oxyMethodsLib(obj, v)
+            obj.oxyMethodsLib = pf2_base.ProcessingContext.asStruct(v);
+        end
+
+        function obj = set.device(obj, v)
+            obj.device = pf2_base.ProcessingContext.asStruct(v);
+        end
+
+        function obj = set.rejectLevel(obj, v)
+            v = pf2_base.ProcessingContext.asScalarDouble(v);
+            pf2_base.ProcessingContext.mustBeInRange(v, 0, 1);
+            obj.rejectLevel = v;
+        end
+
+        function obj = set.processRejected(obj, v)
+            obj.processRejected = pf2_base.ProcessingContext.asScalarLogical(v);
+        end
+
+        function obj = set.outputLegacyMarkers(obj, v)
+            obj.outputLegacyMarkers = pf2_base.ProcessingContext.asScalarLogical(v);
+        end
+
+        function obj = set.rootPath(obj, v)
+            obj.rootPath = pf2_base.ProcessingContext.asCharRow(v);
+        end
 
         function s = toStruct(obj)
             % TOSTRUCT Convert context to a plain struct for saving
@@ -405,12 +528,80 @@ classdef ProcessingContext < matlab.mixin.Copyable
             obj.loadMethods();
         end
     end
-end
 
-function mustBeInRange(value, minVal, maxVal)
-    % Custom validator for rejectLevel
-    if value < minVal || value > maxVal
-        error('MATLAB:validators:mustBeInRange', ...
-            'Value must be between %g and %g', minVal, maxVal);
+    methods (Static, Access = private)
+        function v = asCharRow(v)
+            % Coerce to a char row vector, as a '(1,:) char' declaration does.
+            if isstring(v) && isscalar(v)
+                v = char(v);
+            end
+            if ~ischar(v)
+                error('MATLAB:validation:UnableToConvert', ...
+                    'Value must be a character vector or string scalar.');
+            end
+            if isempty(v)
+                v = char(zeros(1, 0));
+            elseif ~isrow(v)
+                error('MATLAB:validation:IncompatibleSize', ...
+                    'Value must be a 1-by-N character vector.');
+            end
+        end
+
+        function v = asScalarDouble(v)
+            % Coerce to a double scalar, as a '(1,1) double' declaration does.
+            if ~(isnumeric(v) || islogical(v))
+                error('MATLAB:validation:UnableToConvert', ...
+                    'Value must be numeric.');
+            end
+            if ~isscalar(v)
+                error('MATLAB:validation:IncompatibleSize', ...
+                    'Value must be a scalar.');
+            end
+            v = double(v);
+        end
+
+        function v = asDoubleRow(v)
+            % Coerce to a double row vector, as a '(1,:) double' declaration does.
+            if ~(isnumeric(v) || islogical(v))
+                error('MATLAB:validation:UnableToConvert', ...
+                    'Value must be numeric.');
+            end
+            if isempty(v)
+                v = zeros(1, 0);
+            elseif ~isrow(v)
+                error('MATLAB:validation:IncompatibleSize', ...
+                    'Value must be a 1-by-N vector.');
+            end
+            v = double(v);
+        end
+
+        function v = asScalarLogical(v)
+            % Coerce to a logical scalar, as a '(1,1) logical' declaration does.
+            if ~(islogical(v) || isnumeric(v))
+                error('MATLAB:validation:UnableToConvert', ...
+                    'Value must be logical or numeric.');
+            end
+            if ~isscalar(v)
+                error('MATLAB:validation:IncompatibleSize', ...
+                    'Value must be a scalar.');
+            end
+            v = logical(v);
+        end
+
+        function v = asStruct(v)
+            % Require a struct, as a 'struct' class declaration does.
+            if ~isstruct(v)
+                error('MATLAB:validation:UnableToConvert', ...
+                    'Value must be a struct.');
+            end
+        end
+
+        function mustBeInRange(value, minVal, maxVal)
+            % Range validator for rejectLevel.
+            if value < minVal || value > maxVal
+                error('MATLAB:validators:mustBeInRange', ...
+                    'Value must be between %g and %g', minVal, maxVal);
+            end
+        end
     end
 end

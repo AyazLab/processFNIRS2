@@ -75,8 +75,9 @@ classdef GUIContext < pf2_base.ProcessingContext
     end
 
     methods
-        function obj = GUIContext()
+        function obj = GUIContext(varargin)
             % GUICONTEXT Create a new GUI context with defaults
+            % Any input (copy() passes COPY_TOKEN) is ignored.
             obj@pf2_base.ProcessingContext();
         end
 
