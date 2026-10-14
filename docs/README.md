@@ -1,5 +1,7 @@
 # processFNIRS2 Documentation
 
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.23348858.svg)](https://doi.org/10.5281/zenodo.23348858)
+
 Reference documentation for the processFNIRS2 MATLAB fNIRS analysis toolbox.
 New here? Start with the [project README](https://github.com/AyazLab/processFNIRS2/blob/master/README.md)
 for installation and a quick start, then come back for the deeper references
@@ -17,6 +19,16 @@ below. Runnable tutorials live in
 | [CLI_UX_GUIDE.md](CLI_UX_GUIDE.md) | CLI/UX conventions and the progressive-disclosure API pattern. |
 | [EXPLORERNIRS_PIPELINE.md](EXPLORERNIRS_PIPELINE.md) | The group-analysis layer (exploreFNIRS): Experiment class, grouping, statistics. |
 | [ARCHITECTURE.md](ARCHITECTURE.md) | How the toolbox fits together: data flow, package map, and where new code belongs. |
+
+## Citing
+
+If you use processFNIRS2 in your research, please cite it:
+
+> Curtin, A., & Ayaz, H. (2026). *processFNIRS2* (Version v1.2.0) [Computer
+> software]. Zenodo. https://doi.org/10.5281/zenodo.23348858
+
+See [Citing processFNIRS2](CITING.md) for BibTeX and for choosing between the
+project DOI and a per-version DOI.
 
 ## Also useful
 
