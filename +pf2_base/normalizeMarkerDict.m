@@ -69,10 +69,19 @@ if iscell(x)
         error('pf2:normalizeMarkerDict:badCell', ...
             'Cell dictionary needs at least two columns {code, label}.');
     end
-    % Parse codes by value, so a text code '49' becomes 49 (not its codepoint)
-    codes = double(str2double(string(x(:, 1))));
-    codes = codes(:);
-    labels = string(x(:, 2));
+    % Parse codes by value, so a text code '49' becomes 49 (not its
+    % codepoint). Element by element: Octave's string() of a numeric cell
+    % does not keep one element per row.
+    codes = nan(size(x, 1), 1);
+    for r = 1:size(x, 1)
+        v = x{r, 1};
+        if (isnumeric(v) || islogical(v)) && isscalar(v)
+            codes(r) = double(v);
+        else
+            codes(r) = str2double(v);
+        end
+    end
+    labels = reshape(string(x(:, 2)), [], 1);
     d = table(codes, labels, 'VariableNames', canon);
     for c = 3:size(x, 2)
         col = x(:, c);

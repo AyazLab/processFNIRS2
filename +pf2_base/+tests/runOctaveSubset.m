@@ -49,6 +49,7 @@ function nFailed = runOctaveSubset()
     results{end+1} = check('round/contains shims', @() checkShims());
     results{end+1} = check('device geometry', @() checkDevices(ref.devices, tol));
     results{end+1} = check('importNIR', @() checkImport(ref.import));
+    results{end+1} = check('sampleData by name', @() checkSampleData());
     results{end+1} = check('processFNIRS2 default', @() checkHb(ref.default, 'default', tol));
     results{end+1} = check('Pipeline API via ProcessingContext', @() checkHb(ref.pipeline, 'pipeline', tol));
     results{end+1} = check('ProcessingContext copy/validation', @() checkContext());
@@ -136,6 +137,16 @@ function checkImport(r)
     assert(isequal(g.rawSize, r.rawSize), 'raw size differs');
     assertClose(g.rawSum, r.rawSum, 1e-12, 'raw sum');
     assertClose(g.timeSum, r.timeSum, 1e-12, 'time sum');
+end
+
+function checkSampleData()
+    % Under Octave, sampleData.m hides the +sampleData package, so named
+    % datasets are reached as sampleData('name').
+    d = pf2.import.sampleData('fNIR2000');
+    assert(isfield(d, 'raw') && ~isempty(d.raw), 'fNIR2000 has no raw data');
+    assert(height(d.markers) == 27, 'fNIR2000 has %d markers, expected 27', height(d.markers));
+    dict = pf2.data.getMarkerDict(d);
+    assert(isequal(dict.Code(:)', [1 2]), 'marker dictionary codes differ');
 end
 
 function checkHb(r, op, tol)

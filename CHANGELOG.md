@@ -6,6 +6,7 @@ Groundwork for running headless single-subject processing under GNU Octave.
 ### Added
 
 - GNU Octave CI (`.github/workflows/octave.yml`) runs `pf2_base.tests.runOctaveSubset` in the `gnuoctave/octave:11.3.0` image on every push and pull request. It covers package loading, the INI reader/writer, every shipped device, import, default processing, the Pipeline API through a `ProcessingContext`, the block-averaging recipe (markers, blocks, epochs, averages, sliding windows) and the QC pipeline, and compares numerical results with a MATLAB reference (`+pf2_base/+tests/+data/octave_reference.mat`, rebuilt with `pf2_base.tests.generateOctaveReference`). The job removes the root `pf2.m` GUI launcher from its checkout, since under Octave it shadows the `+pf2` package.
+- `pf2.import.sampleData(name, ...)` loads a named sample dataset (`'fNIR2000'`, `'experiment'`, `'group'`, ...), equivalent to `pf2.import.sampleData.<name>(...)`. Under Octave this is the form that works, since there `sampleData.m` hides the `+sampleData` namespace.
 - `pf2_base.args.parse` and `pf2_base.args.check` reproduce arguments-block input handling (optional positional inputs, name-value matching, class conversion, size checks, validators and their error identifiers) in a form Octave can run.
 - `pf2_base.env.ensureOctaveCompat` loads the Octave `datatypes`, `signal` and `statistics` packages and adds `compat_shims/octave` (`contains`, `strip`, `strlength`, `extractAfter`, `extractBefore`, `isStringScalar`, two-argument `round`). It runs automatically at the importer, device-loading and initialization entry points and does nothing under MATLAB.
 - `pf2_base.env.runtime` now reports missing `datatypes` and `statistics` packages as well as `signal`.
@@ -24,6 +25,9 @@ Groundwork for running headless single-subject processing under GNU Octave.
 
 - `pf2_base.tests.unit.AllPlotsSmokeTest/testCreateFigure` pins light mode, as `PlotStyleTest` does, so a dark default figure color left by earlier rendering tests no longer fails it.
 - `pf2_base.tests.integration.FullPipelineTest/testDifferentMethods` builds its method combinations with the Pipeline API and runs them through a `ProcessingContext`, so it no longer skips on machines without the named methods in their library or changes the global method selection.
+- `pf2_base.normalizeMarkerDict` parses `{code, label}` cell dictionaries element by element, so numeric codes keep one row each under Octave.
+- `pf2_base.external.zp2sos` orders complex roots with `sortrows` instead of `sort(..., 'ComparisonMethod', 'real')`, which Octave lacks; the resulting second-order sections are identical.
+- `pf2.import.importHitachiMES` no longer requests the unused second output of `strsplit`, and `pf2.data.split` assigns its time-size variables directly; both failed under Octave.
 - `loadDeviceCfg` and `pf2_base.gui.updateCurrentDevice` assign whole table columns instead of growing them by indexed assignment, and no longer call `sprintf` on a categorical or `nansum` on a logical.
 - `bvoxy` declares its positional `coefs` and `isOD` options before its name-value parameters. Argument handling under MATLAB is unchanged.
 - Calls to the undocumented `fields` alias use `fieldnames`.

@@ -511,9 +511,9 @@ function [outAuxStruct] = recursiveAuxFlatten(aux_in,nir_time,parent_time_in)
         outAuxStruct.(validTimeFields{cur_time_ind})=local_time;
     end
 
-    szLocalTime(:)=size(local_time);
-    szParentTime(:)=size(parent_time_in);
-    szNIRTime(:)=size(nir_time);
+    szLocalTime=size(local_time);
+    szParentTime=size(parent_time_in);
+    szNIRTime=size(nir_time);
 
 
     % look through each aux field for times

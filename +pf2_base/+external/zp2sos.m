@@ -149,7 +149,10 @@ isReal = abs(imag(r)) <= tol;
 
 % Complex roots: keep those with positive imaginary part; pair with conjugate.
 cpos = r(~isReal & imag(r) > 0);
-cpos = sort(cpos, 'ascend', 'ComparisonMethod', 'real');
+% Ascending by real part, ties by imaginary part (MATLAB's
+% 'ComparisonMethod','real'; written out because Octave's sort lacks it).
+[~, ord] = sortrows([real(cpos(:)), imag(cpos(:))]);
+cpos = cpos(ord);
 for ii = 1:numel(cpos)
     quad{end+1} = [cpos(ii); conj(cpos(ii))]; %#ok<AGROW>
 end
