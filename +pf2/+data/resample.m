@@ -1,4 +1,4 @@
-function [outFNIR, pFit] = resample(fNIR, segmentLength, blLength, opts)
+function [outFNIR, pFit] = resample(fNIR, varargin)
 % RESAMPLE Downsample and time-average fNIRS data
 %
 % Resamples fNIRS data to a lower sampling rate by averaging samples within
@@ -60,21 +60,24 @@ function [outFNIR, pFit] = resample(fNIR, segmentLength, blLength, opts)
 %
 % See also: pf2.data.split, pf2.data.setT0, pf2.data.concatenate
 
-arguments
-    fNIR
-    segmentLength (1,1) {mustBeNumeric, mustBePositive} = 1
-    blLength {mustBeNumeric} = []
-    opts.blfNIR = []
-    opts.centerOnT0 (1,1) logical = false
-    opts.timeOutMode {mustBeMember(opts.timeOutMode, {'mid','start','end'})} = 'start'
-    opts.nanRejectionLevel (1,1) {mustBeNumeric, mustBeNonnegative} = 0.7
-    opts.averageAux (1,1) logical = false
-    opts.flattenAux (1,1) logical = false
-    opts.trimAux (1,1) logical = false
-    opts.polyDegree (1,1) {mustBeNumeric, mustBeNonnegative} = 1
-    opts.centerOnTime {mustBeNumeric} = NaN
-    opts.specifiedTimepoints {mustBeNumeric} = []
-end
+% Inputs are parsed with pf2_base.args rather than an arguments block so
+% the function also runs under GNU Octave. Spec rows are {name, default,
+% size, class, validators}.
+[segmentLength, blLength, opts] = pf2_base.args.parse('resample', varargin, {
+    'segmentLength', (1), '1,1', '', {@mustBeNumeric, @mustBePositive}
+    'blLength',      ([]), '', '', {@mustBeNumeric}
+    }, {
+    'blfNIR',              ([]), '', '', {}
+    'centerOnT0',          (false), '1,1', 'logical', {}
+    'timeOutMode',         ('start'), '', '', {@(v) mustBeMember(v, {'mid','start','end'})}
+    'nanRejectionLevel',   (0.7), '1,1', '', {@mustBeNumeric, @mustBeNonnegative}
+    'averageAux',          (false), '1,1', 'logical', {}
+    'flattenAux',          (false), '1,1', 'logical', {}
+    'trimAux',             (false), '1,1', 'logical', {}
+    'polyDegree',          (1), '1,1', '', {@mustBeNumeric, @mustBeNonnegative}
+    'centerOnTime',        (NaN), '', '', {@mustBeNumeric}
+    'specifiedTimepoints', ([]), '', '', {@mustBeNumeric}
+    });
 
 segLength=segmentLength; % How long is each segment, ie: 1 sample
 blfNIR=opts.blfNIR; % Separate baseline source struct/array (mutated as a local below)

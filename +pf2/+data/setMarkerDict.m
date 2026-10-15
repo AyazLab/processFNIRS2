@@ -1,4 +1,4 @@
-function data = setMarkerDict(data, dict, opts)
+function data = setMarkerDict(data, dict, varargin)
 % SETMARKERDICT Set or merge the dataset's marker dictionary
 %
 % Stores a canonical code->label dictionary at data.info.markerDict so that
@@ -46,11 +46,12 @@ function data = setMarkerDict(data, dict, opts)
 % See also: pf2.data.getMarkerDict, pf2.data.labelMarkers,
 %           pf2_base.normalizeMarkerDict
 
-arguments
-    data
-    dict
-    opts.Merge (1,1) logical = true
-end
+% Inputs are parsed with pf2_base.args rather than an arguments block so
+% the function also runs under GNU Octave. Spec rows are {name, default,
+% size, class, validators}.
+opts = pf2_base.args.parse('setMarkerDict', varargin, {}, {
+    'Merge', (true), '1,1', 'logical', {}
+    });
 
 % Cell array: apply to each element
 if iscell(data)

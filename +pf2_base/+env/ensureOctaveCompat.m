@@ -7,7 +7,8 @@ function ensureOctaveCompat()
 % string; signal and statistics for filtering and nan* reductions) and adds
 % compat_shims/octave, which supplies MATLAB functions core Octave lacks
 % (contains, strip, strlength, extractAfter/extractBefore, isStringScalar,
-% and the two-argument form of round). Missing packages are reported once
+% the two-argument form of round, and the mustBeA, mustBeText,
+% mustBeTextScalar and mustBeScalarOrEmpty validators). Missing packages are reported once
 % with a warning; the shims are still added.
 %
 % Called from pf2_base.ensureStatsFallbacks, which runs at the importer,

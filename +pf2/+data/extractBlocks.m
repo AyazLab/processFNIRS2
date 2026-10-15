@@ -1,4 +1,4 @@
-function segments = extractBlocks(data, blocks, opts)
+function segments = extractBlocks(data, varargin)
 % EXTRACTBLOCKS Extract each block as a separate fNIRS struct
 %
 % Takes an fNIRS data structure and a block definition array (from
@@ -87,21 +87,24 @@ function segments = extractBlocks(data, blocks, opts)
 %
 % See also: pf2.data.defineBlocks, pf2.data.split, pf2.data.setT0
 
-arguments
-    data
-    blocks                  = []
-    opts.PreTime            {mustBeNumeric} = []
-    opts.PostTime           {mustBeNumeric} = []
-    opts.Buffer             = []   % [] = not given; effective default 2 s (both sides)
-    opts.BaselineWindow     {mustBeNumeric} = []
-    opts.SetT0              (1,1) logical = true
-    opts.OverwriteInfo      (1,1) logical = true
-    opts.CopyInfo           (1,1) logical = true   % Kept for backward compat, ignored
-    opts.SkipInvalid        (1,1) logical = true
-    opts.RejectByAux        = ''
-    opts.AuxMotionFraction  (1,1) {mustBeNumeric} = 0.2
-    opts.AuxMotionThresh    = []
-end
+% Inputs are parsed with pf2_base.args rather than an arguments block so
+% the function also runs under GNU Octave. Spec rows are {name, default,
+% size, class, validators}.
+[blocks, opts] = pf2_base.args.parse('extractBlocks', varargin, {
+    'blocks', ([]), '', '', {}
+    }, {
+    'PreTime',           ([]), '', '', {@mustBeNumeric}
+    'PostTime',          ([]), '', '', {@mustBeNumeric}
+    'Buffer',            ([]), '', '', {}
+    'BaselineWindow',    ([]), '', '', {@mustBeNumeric}
+    'SetT0',             (true), '1,1', 'logical', {}
+    'OverwriteInfo',     (true), '1,1', 'logical', {}
+    'CopyInfo',          (true), '1,1', 'logical', {}
+    'SkipInvalid',       (true), '1,1', 'logical', {}
+    'RejectByAux',       (''), '', '', {}
+    'AuxMotionFraction', (0.2), '1,1', '', {@mustBeNumeric}
+    'AuxMotionThresh',   ([]), '', '', {}
+    });
 
 % --- Cell array input: iterate and concatenate ---
 if iscell(data)

@@ -94,6 +94,11 @@ forceLoad = isempty(deviceCfgFilename)>0;
 if ~forceLoad&&~isempty(deviceTable) && any(strcmp(name, deviceTable.Probe)) && loadFromGlobal
     global setF
     setF = deviceTable.ProbeInfo(strcmp(name, deviceTable.Probe));
+    % MATLAB stores the struct column as a struct array; Octave's datatypes
+    % keeps it as a cell column.
+    if iscell(setF)
+        setF = setF{1};
+    end
     probeInfo = setF.device;
     return;
 end

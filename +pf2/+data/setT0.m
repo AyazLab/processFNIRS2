@@ -1,4 +1,4 @@
-function outFNIR=setT0(fnirStruct,t0time)
+function outFNIR=setT0(fnirStruct, t0time)
 % SETT0 Shift time alignment of fNIRS data to a new reference point
 %
 % Adjusts the time vector and related temporal fields in an fNIRS struct
@@ -42,10 +42,10 @@ function outFNIR=setT0(fnirStruct,t0time)
 %
 % See also: pf2.data.split, pf2.data.getMarkers, pf2.data.resample
 
-arguments
-    fnirStruct (1,1) struct
-    t0time {mustBeA(t0time, ["numeric", "duration", "datetime"])}
-end
+% Inputs are checked with pf2_base.args rather than an arguments block so
+% the function also runs under GNU Octave.
+fnirStruct = pf2_base.args.check(fnirStruct, '1,1', 'struct', {}, 'Invalid argument at position 1.');
+t0time = pf2_base.args.check(t0time, '', '', {@(v) mustBeA(v, {'numeric', 'duration', 'datetime'})}, 'Invalid argument at position 2.');
 
 outFNIR=fnirStruct;
 

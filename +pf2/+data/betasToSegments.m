@@ -1,4 +1,4 @@
-function segments = betasToSegments(glmResults, data, opts)
+function segments = betasToSegments(glmResults, data, varargin)
 % BETASTOSEGMENTS Package GLM betas into Experiment-compatible pseudo-segments
 %
 % Converts first-level GLM beta weights into fNIRS-like structs that can be
@@ -58,15 +58,18 @@ function segments = betasToSegments(glmResults, data, opts)
 %           exploreFNIRS.core.Experiment
 
 % --- Parse inputs ---
-arguments
-    glmResults {mustBeA(glmResults, 'struct')}
-    data {mustBeA(data, 'struct')}
-    opts.Biomarker = 'HbO'
-    opts.Conditions {mustBeA(opts.Conditions, 'cell')} = {}
-    opts.ConditionMap {mustBeA(opts.ConditionMap, 'cell')} = {}
-    opts.Units = '\beta'
-    opts.BiomarkerResults = []
-end
+% Inputs are parsed with pf2_base.args rather than an arguments block so
+% the function also runs under GNU Octave. Spec rows are {name, default,
+% size, class, validators}.
+glmResults = pf2_base.args.check(glmResults, '', '', {@(v) mustBeA(v, 'struct')}, 'Invalid argument at position 1.');
+data = pf2_base.args.check(data, '', '', {@(v) mustBeA(v, 'struct')}, 'Invalid argument at position 2.');
+opts = pf2_base.args.parse('betasToSegments', varargin, {}, {
+    'Biomarker',        ('HbO'), '', '', {}
+    'Conditions',       ({}), '', '', {@(v) mustBeA(v, 'cell')}
+    'ConditionMap',     ({}), '', '', {@(v) mustBeA(v, 'cell')}
+    'Units',            ('\beta'), '', '', {}
+    'BiomarkerResults', ([]), '', '', {}
+    });
 
 biomarker = char(opts.Biomarker);
 conditions = opts.Conditions;

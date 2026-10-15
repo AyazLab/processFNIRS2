@@ -1,4 +1,4 @@
-function blocks = defineBlocks(data, markerCodes, duration, opts)
+function blocks = defineBlocks(data, varargin)
 % DEFINEBLOCKS Create block definition struct array from event markers
 %
 % Parses fNIRS markers into a block definition array describing time
@@ -150,27 +150,30 @@ function blocks = defineBlocks(data, markerCodes, duration, opts)
 % See also: pf2.data.extractBlocks, pf2.data.getMarkers, pf2.data.split, ...
 %           pf2.data.dedupeMarkers, pf2.data.removeMarkers
 
-arguments
-    data
-    markerCodes         {mustBeNumeric} = []
-    duration            {mustBeNumeric, mustBeScalarOrEmpty} = []
-    opts.MarkerCode     {mustBeNumeric} = []
-    opts.Duration       (1,1) {mustBeNumeric, mustBeNonnegative} = 0
-    opts.UseDuration    (1,1) logical = false
-    opts.StartMarker    {mustBeNumeric} = []
-    opts.EndMarker      {mustBeNumeric} = []
-    opts.ConditionMap   = []            % [] = not provided (auto-populate); a cell = provided
-    opts.ConditionField = 'Condition'
-    opts.InfoTable      = []
-    opts.InfoFields     (1,1) struct = struct()
-    opts.MinDuration    (1,1) {mustBeNumeric} = 0
-    opts.MaxDuration    (1,1) {mustBeNumeric} = Inf
-    opts.SortByTime     (1,1) logical = true
-    opts.PrePad         (1,1) {mustBeNumeric, mustBeNonnegative} = 0
-    opts.PostPad        (1,1) {mustBeNumeric, mustBeNonnegative} = 0
-    opts.MarkerWindow   = 'core'
-    opts.Embed          (1,1) logical = true
-end
+% Inputs are parsed with pf2_base.args rather than an arguments block so
+% the function also runs under GNU Octave. Spec rows are {name, default,
+% size, class, validators}.
+[markerCodes, duration, opts] = pf2_base.args.parse('defineBlocks', varargin, {
+    'markerCodes', ([]), '', '', {@mustBeNumeric}
+    'duration',    ([]), '', '', {@mustBeNumeric, @mustBeScalarOrEmpty}
+    }, {
+    'MarkerCode',     ([]), '', '', {@mustBeNumeric}
+    'Duration',       (0), '1,1', '', {@mustBeNumeric, @mustBeNonnegative}
+    'UseDuration',    (false), '1,1', 'logical', {}
+    'StartMarker',    ([]), '', '', {@mustBeNumeric}
+    'EndMarker',      ([]), '', '', {@mustBeNumeric}
+    'ConditionMap',   ([]), '', '', {}
+    'ConditionField', ('Condition'), '', '', {}
+    'InfoTable',      ([]), '', '', {}
+    'InfoFields',     (struct()), '1,1', 'struct', {}
+    'MinDuration',    (0), '1,1', '', {@mustBeNumeric}
+    'MaxDuration',    (Inf), '1,1', '', {@mustBeNumeric}
+    'SortByTime',     (true), '1,1', 'logical', {}
+    'PrePad',         (0), '1,1', '', {@mustBeNumeric, @mustBeNonnegative}
+    'PostPad',        (0), '1,1', '', {@mustBeNumeric, @mustBeNonnegative}
+    'MarkerWindow',   ('core'), '', '', {}
+    'Embed',          (true), '1,1', 'logical', {}
+    });
 
 % --- Cell array input: apply to each element (requires Embed) ---
 if iscell(data)

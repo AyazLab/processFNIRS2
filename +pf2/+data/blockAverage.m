@@ -1,4 +1,4 @@
-function ga = blockAverage(segments, opts)
+function ga = blockAverage(segments, varargin)
 % BLOCKAVERAGE Trial/grand average of epoched fNIRS segments onto a common grid
 %
 % Averages a cell array of epoched fNIRS structs (e.g. from
@@ -66,12 +66,14 @@ function ga = blockAverage(segments, opts)
 % See also: pf2.data.extractBlocks, pf2.data.defineBlocks,
 %           exploreFNIRS.core.Experiment, grandAvgFNIRS
 
-arguments
-    segments
-    opts.ResampleInterval {mustBeNumeric} = []
-    opts.AverageAux = false
-    opts.HierarchyVars {mustBeNumeric} = []
-end
+% Inputs are parsed with pf2_base.args rather than an arguments block so
+% the function also runs under GNU Octave. Spec rows are {name, default,
+% size, class, validators}.
+opts = pf2_base.args.parse('blockAverage', varargin, {}, {
+    'ResampleInterval', ([]), '', '', {@mustBeNumeric}
+    'AverageAux',       (false), '', '', {}
+    'HierarchyVars',    ([]), '', '', {@mustBeNumeric}
+    });
 
 pf2_base.ensureStatsFallbacks();  % ensure stats-toolbox fallbacks (nan*) are on the path before use
 
