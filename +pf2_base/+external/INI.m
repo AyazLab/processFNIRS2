@@ -92,7 +92,7 @@ classdef INI < handle
                     error('pf2_base:external:INI:badProperty', ...
                         'Property "%s" not supported.', name);
                 end
-                if obj.isFixed(prop)
+                if obj.isPublicProp(prop)
                     obj.(prop) = value;
                 else
                     obj.Data.(prop) = value;
@@ -112,7 +112,7 @@ classdef INI < handle
                 error('pf2_base:external:INI:badProperty', ...
                     'Property "%s" not supported.', name);
             end
-            if obj.isFixed(prop)
+            if obj.isPublicProp(prop)
                 value = obj.(prop);
             else
                 value = obj.Data.(prop);
@@ -266,6 +266,21 @@ classdef INI < handle
         end
 
 
+        function disp(obj)
+            % Display the fixed properties followed by each section.
+            builtin('disp', obj);
+            if ~isscalar(obj)
+                return;
+            end
+            mapFields = fieldnames(obj.PropToSection);
+            for k = 1:numel(mapFields)
+                if isfield(obj.Data, mapFields{k})
+                    fprintf('  [%s]\n', obj.PropToSection.(mapFields{k}));
+                    disp(obj.Data.(mapFields{k}));
+                end
+            end
+        end
+
         function tf = isprop(obj, name)
             % True for the fixed properties and for registered sections.
             tf = obj.hasProp(name);
@@ -274,6 +289,21 @@ classdef INI < handle
         function varargout = subsref(obj, s)
             % obj.<Section>[...] reads section data; everything else
             % (fixed properties, method calls) uses built-in indexing.
+            if strcmp(s(1).type, '()') && numel(s) > 1
+                % Index into an object array, then continue on the result.
+                [varargout{1:nargout}] = subsref(builtin('subsref', obj, s(1)), s(2:end));
+                return;
+            end
+            if ~isscalar(obj) && strcmp(s(1).type, '.')
+                % Comma-separated list over the array elements.
+                varargout = cell(1, numel(obj));
+                for k = 1:numel(obj)
+                    varargout{k} = subsref(builtin('subsref', obj, ...
+                        struct('type', '()', 'subs', {{k}})), s);
+                end
+                return;
+            end
+            obj.checkPublicAccess(s);
             if strcmp(s(1).type, '.') && ischar(s(1).subs) && isfield(obj.Data, s(1).subs)
                 value = obj.Data.(s(1).subs);
                 if numel(s) > 1
@@ -288,6 +318,7 @@ classdef INI < handle
 
         function obj = subsasgn(obj, s, value)
             % obj.<Section>[...] = V writes into an existing section.
+            obj.checkPublicAccess(s);
             if strcmp(s(1).type, '.') && ischar(s(1).subs) && isfield(obj.Data, s(1).subs)
                 if numel(s) > 1
                     value = subsasgn(obj.Data.(s(1).subs), s(2:end), value);
@@ -301,13 +332,21 @@ classdef INI < handle
         function n = numArgumentsFromSubscript(obj, s, context)
             % Section and property reads return a single value unless
             % trailing brace indexing expands to a comma-separated list.
+            if strcmp(s(1).type, '()') && numel(s) > 1
+                n = numArgumentsFromSubscript(builtin('subsref', obj, s(1)), s(2:end), context);
+                return;
+            end
+            if ~isscalar(obj)
+                n = numel(obj);
+                return;
+            end
             isDot = strcmp(s(1).type, '.') && ischar(s(1).subs);
             if isDot && isfield(obj.Data, s(1).subs)
                 base = obj.Data.(s(1).subs);
             elseif ~pf2_base.env.isOctave()
                 n = builtin('numArgumentsFromSubscript', obj, s, context);
                 return;
-            elseif isDot && obj.isFixed(s(1).subs)
+            elseif isDot && obj.isPublicProp(s(1).subs)
                 % Octave has no built-in to defer to; every public method
                 % returns one value, so only brace reads need counting.
                 base = obj.(s(1).subs);
@@ -331,10 +370,12 @@ classdef INI < handle
         function obj = loadobj(s)
             % Rebuild objects saved by the dynamicprops implementation,
             % whose sections were stored as dynamic properties. MATLAB
-            % drops those values when loading into this class, so the
-            % sections are re-read from File when it is still available.
+            % restores those as dynamic properties on load; their values
+            % are moved into Data. Sections that still have no data are
+            % re-read from File when it is available.
             if isa(s, 'pf2_base.external.INI')
                 obj = s;
+                obj.recoverDynamicSections();
                 obj.restoreMissingSections();
                 return;
             end
@@ -364,15 +405,65 @@ classdef INI < handle
 
     methods (Access = private)
 
-        function tf = isFixed(~, name)
-            % True for the class's own (non-section) property names.
-            tf = any(strcmp(name, {'File', 'CommentChar', 'NewLineChar', ...
-                'Sections', 'PropToSection', 'Data'}));
+        function tf = isPublicProp(~, name)
+            % True for the class's own public (non-section) property names.
+            tf = any(strcmp(name, {'File', 'CommentChar', 'NewLineChar', 'Sections'}));
+        end
+
+        function tf = isReserved(~, name)
+            % True for names a section must not take: any property or
+            % method of the class, including inherited handle methods.
+            persistent reserved
+            if isempty(reserved)
+                reserved = [{'File', 'CommentChar', 'NewLineChar', 'Sections', ...
+                    'PropToSection', 'Data'}, ...
+                    pf2_base.external.INI.privateMethodNames(), ...
+                    reshape(methods('pf2_base.external.INI'), 1, [])];
+            end
+            tf = any(strcmp(name, reserved));
         end
 
         function tf = hasProp(obj, name)
-            % True for a fixed property or a registered section field.
-            tf = obj.isFixed(name) || isfield(obj.Data, name);
+            % True for a public property or a registered section field.
+            tf = obj.isPublicProp(name) || isfield(obj.Data, name);
+        end
+
+        function checkPublicAccess(~, s)
+            % The overloaded subsref/subsasgn run with class access, so
+            % reject outside references to private members explicitly.
+            % Octave already enforces this itself.
+            if pf2_base.env.isOctave() || ~strcmp(s(1).type, '.') || ~ischar(s(1).subs)
+                return;
+            end
+            name = s(1).subs;
+            if any(strcmp(name, {'PropToSection', 'Data'}))
+                error('MATLAB:class:GetProhibited', ...
+                    'Cannot access the ''%s'' property of class ''INI''.', name);
+            end
+            if any(strcmp(name, pf2_base.external.INI.privateMethodNames()))
+                error('MATLAB:class:MethodRestricted', ...
+                    'Cannot access method ''%s'' in class ''pf2_base.external.INI''.', name);
+            end
+        end
+
+        function recoverDynamicSections(obj)
+            % Move section values held in dynamic properties (objects
+            % saved by the dynamicprops implementation) into Data.
+            if pf2_base.env.isOctave()
+                return;
+            end
+            mapFields = fieldnames(obj.PropToSection);
+            for k = 1:numel(mapFields)
+                p = findprop(obj, mapFields{k});
+                % Any property found under a section's name that is not
+                % declared by the class is a leftover dynamic property
+                % (meta.DynamicProperty, or matlab.metadata.DynamicProperty
+                % in newer releases).
+                if ~isempty(p) && ~obj.isReserved(mapFields{k})
+                    obj.Data.(mapFields{k}) = obj.(mapFields{k});
+                    delete(p);
+                end
+            end
         end
 
         function restoreMissingSections(obj)
@@ -387,18 +478,28 @@ classdef INI < handle
             end
             if exist(obj.File, 'file') == 2
                 try
-                    obj.read();
-                    return;
+                    fromFile = pf2_base.external.INI('File', obj.File);
+                    fromFile.read();
+                    for k = 1:numel(missing)
+                        name = obj.PropToSection.(missing{k});
+                        if ismember(name, fromFile.Sections)
+                            obj.Data.(missing{k}) = fromFile.get(name);
+                        end
+                    end
                 catch
-                    % Fall through and prune.
+                    % Leave the rest missing; they are pruned below.
                 end
+                missing = mapFields(~isfield(obj.Data, mapFields));
+            end
+            if isempty(missing)
+                return;
             end
             for k = 1:numel(missing)
                 obj.dropSectionByProperty(missing{k});
             end
             warning('pf2_base:external:INI:sectionsNotRestored', ...
                 ['Section data from a saved INI object could not be ' ...
-                 'restored because "%s" is unavailable.'], obj.File);
+                 'restored from "%s".'], obj.File);
         end
 
         function prop = resolveProperty(obj, name)
@@ -454,8 +555,9 @@ classdef INI < handle
             if isempty(prop)
                 prop = 'Section';
             end
-            % Avoid collision with the fixed properties.
-            while obj.isFixed(prop)
+            % Avoid collision with properties and method names, which
+            % section lookup would otherwise shadow.
+            while obj.isReserved(prop)
                 prop = ['x_' prop]; %#ok<AGROW>
             end
             if ~isfield(obj.Data, prop)
@@ -542,6 +644,21 @@ classdef INI < handle
     end
 
     methods (Static, Access = private)
+
+        function names = privateMethodNames()
+            % Private instance and static method names, kept in sync with
+            % the private methods blocks of this file.
+            names = {'isPublicProp', 'isReserved', 'hasProp', ...
+                'checkPublicAccess', 'recoverDynamicSections', ...
+                'restoreMissingSections', 'resolveProperty', ...
+                'sectionProperty', 'ensureSection', 'clearSections', ...
+                'dropSectionByProperty', 'stripInlineComment', ...
+                'isCommentLine', 'privateMethodNames', ...
+                'looksLikeAssignment', 'parseValue', 'parseQuoted', ...
+                'bracketsBalanced', 'toLiteral', 'cellLiteral', ...
+                'numericLiteral', 'coerceToStruct', 'sanitizeName', ...
+                'readFileText'};
+        end
 
         function tf = looksLikeAssignment(line)
             % Heuristic: a continuation line that itself looks like "key ="

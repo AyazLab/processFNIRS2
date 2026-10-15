@@ -6,7 +6,9 @@ function out = strip(str, side, stripChar)
 %
 %   Inputs:
 %     str       - char row or cellstr.
-%     side      - (optional) 'both' (default), 'left', or 'right'.
+%     side      - (optional) 'both' (default), 'left', or 'right'. Any
+%                 other single character in this position is taken as
+%                 stripChar, as in MATLAB's strip(str, stripChar).
 %     stripChar - (optional) Single character to remove. Default removes
 %                 whitespace.
 %
@@ -20,6 +22,10 @@ if nargin < 2 || isempty(side)
 end
 if nargin < 3
     stripChar = '';
+    if ~any(strcmpi(side, {'both', 'left', 'right'}))
+        stripChar = char(side);
+        side = 'both';
+    end
 end
 
 if iscell(str)

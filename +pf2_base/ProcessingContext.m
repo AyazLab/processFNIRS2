@@ -87,8 +87,11 @@ classdef ProcessingContext < handle
     % inline declarations (e.g. 'dpfMode (1,:) char {mustBeMember(...)}'),
     % and copy() is implemented here rather than inherited from
     % matlab.mixin.Copyable, so the class also parses under GNU Octave.
-    % Values are coerced and validated exactly as the inline form did,
-    % including MATLAB's error identifiers.
+    % The set methods convert, size-check and validate in the same order as
+    % the inline declarations, with the same error identifiers. One
+    % difference: objects such as datetime or categorical assigned to a
+    % struct-valued property now error instead of being converted with
+    % struct().
     %
     % See also: processFNIRS2, pf2_base.pf2_initialize
 
@@ -232,11 +235,13 @@ classdef ProcessingContext < handle
             end
         end
 
-        % copy() is inherited from matlab.mixin.Copyable: it returns an
-        % independent instance of the concrete class WITHOUT invoking the
-        % constructor (so it never re-loads method libraries or touches
-        % globals). This is what per-worker / per-subject configuration needs,
-        % since plain assignment (ctx2 = ctx) only aliases the handle:
+        % copy() returns an independent instance of the concrete class. It
+        % constructs that class with COPY_TOKEN, which subclass constructors
+        % must accept and use to skip expensive setup (loading method
+        % libraries, reading globals), then copies every public property.
+        % Subclasses that keep state in non-public properties must copy it
+        % themselves. This is what per-worker / per-subject configuration
+        % needs, since plain assignment (ctx2 = ctx) only aliases the handle:
         %
         %   parfor i = 1:N
         %       c = baseCtx.copy();
@@ -255,12 +260,19 @@ classdef ProcessingContext < handle
             % Syntax:
             %   c = ctx.copy();
 
-            c = feval(class(obj), pf2_base.ProcessingContext.COPY_TOKEN);
-            props = properties(obj);
-            props = props(~strcmp(props, 'COPY_TOKEN'));
-            for k = 1:numel(props)
-                c.(props{k}) = obj.(props{k});
+            if isempty(obj)
+                c = obj;
+                return;
             end
+            props = properties(obj(1));
+            props = props(~strcmp(props, 'COPY_TOKEN'));
+            for n = numel(obj):-1:1
+                c(n) = feval(class(obj(n)), pf2_base.ProcessingContext.COPY_TOKEN);
+                for k = 1:numel(props)
+                    c(n).(props{k}) = obj(n).(props{k});
+                end
+            end
+            c = reshape(c, size(obj));
         end
 
         function obj = set.dpfMode(obj, v)
@@ -530,69 +542,78 @@ classdef ProcessingContext < handle
     end
 
     methods (Static, Access = private)
+        % The helpers below follow the order MATLAB applies to a typed
+        % property declaration: convert to the declared class, then check
+        % or reshape to the declared size, then run validators. Conversion
+        % failures raise MATLAB:validation:UnableToConvert and size
+        % failures MATLAB:validation:IncompatibleSize, as the declarations
+        % did.
+
         function v = asCharRow(v)
-            % Coerce to a char row vector, as a '(1,:) char' declaration does.
-            if isstring(v) && isscalar(v)
-                v = char(v);
-            end
-            if ~ischar(v)
-                error('MATLAB:validation:UnableToConvert', ...
-                    'Value must be a character vector or string scalar.');
-            end
-            if isempty(v)
-                v = char(zeros(1, 0));
-            elseif ~isrow(v)
-                error('MATLAB:validation:IncompatibleSize', ...
-                    'Value must be a 1-by-N character vector.');
-            end
+            % As a '(1,:) char' declaration.
+            v = pf2_base.ProcessingContext.convertTo(v, @char);
+            v = pf2_base.ProcessingContext.asRow(v);
         end
 
         function v = asScalarDouble(v)
-            % Coerce to a double scalar, as a '(1,1) double' declaration does.
-            if ~(isnumeric(v) || islogical(v))
-                error('MATLAB:validation:UnableToConvert', ...
-                    'Value must be numeric.');
-            end
-            if ~isscalar(v)
-                error('MATLAB:validation:IncompatibleSize', ...
-                    'Value must be a scalar.');
-            end
-            v = double(v);
+            % As a '(1,1) double' declaration.
+            v = pf2_base.ProcessingContext.convertTo(v, @double);
+            pf2_base.ProcessingContext.requireScalar(v);
         end
 
         function v = asDoubleRow(v)
-            % Coerce to a double row vector, as a '(1,:) double' declaration does.
-            if ~(isnumeric(v) || islogical(v))
-                error('MATLAB:validation:UnableToConvert', ...
-                    'Value must be numeric.');
-            end
-            if isempty(v)
-                v = zeros(1, 0);
-            elseif ~isrow(v)
-                error('MATLAB:validation:IncompatibleSize', ...
-                    'Value must be a 1-by-N vector.');
-            end
-            v = double(v);
+            % As a '(1,:) double' declaration.
+            v = pf2_base.ProcessingContext.convertTo(v, @double);
+            v = pf2_base.ProcessingContext.asRow(v);
         end
 
         function v = asScalarLogical(v)
-            % Coerce to a logical scalar, as a '(1,1) logical' declaration does.
-            if ~(islogical(v) || isnumeric(v))
-                error('MATLAB:validation:UnableToConvert', ...
-                    'Value must be logical or numeric.');
-            end
-            if ~isscalar(v)
-                error('MATLAB:validation:IncompatibleSize', ...
-                    'Value must be a scalar.');
-            end
-            v = logical(v);
+            % As a '(1,1) logical' declaration.
+            v = pf2_base.ProcessingContext.convertTo(v, @logical);
+            pf2_base.ProcessingContext.requireScalar(v);
         end
 
         function v = asStruct(v)
-            % Require a struct, as a 'struct' class declaration does.
-            if ~isstruct(v)
+            % As a 'struct' declaration: structs pass through, and an
+            % empty numeric, char or logical array becomes a field-less
+            % struct array of the same size.
+            if isstruct(v)
+                return;
+            end
+            if isempty(v) && (isnumeric(v) || ischar(v) || islogical(v))
+                v = repmat(struct(), size(v));
+                return;
+            end
+            error('MATLAB:validation:UnableToConvert', ...
+                'Value must be a struct.');
+        end
+
+        function v = convertTo(v, convertFcn)
+            % Apply a class conversion, reporting failure as MATLAB does.
+            try
+                v = convertFcn(v);
+            catch
                 error('MATLAB:validation:UnableToConvert', ...
-                    'Value must be a struct.');
+                    'Value must be convertible to %s.', func2str(convertFcn));
+            end
+        end
+
+        function v = asRow(v)
+            % Reshape a vector or 0-by-0 empty to a row, as a '(1,:)' size
+            % declaration does; reject anything else.
+            if isvector(v) || isequal(size(v), [0 0])
+                v = reshape(v, 1, []);
+            else
+                error('MATLAB:validation:IncompatibleSize', ...
+                    'Value must be a 1-by-N vector.');
+            end
+        end
+
+        function requireScalar(v)
+            % Reject non-scalars, as a '(1,1)' size declaration does.
+            if ~isscalar(v)
+                error('MATLAB:validation:IncompatibleSize', ...
+                    'Value must be a scalar.');
             end
         end
 

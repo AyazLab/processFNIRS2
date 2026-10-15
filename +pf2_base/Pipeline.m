@@ -49,9 +49,14 @@ classdef Pipeline
         end
 
         function obj = set.steps(obj, v)
+            % As a 'cell' declaration: an empty numeric array becomes {}.
             if ~iscell(v)
-                error('MATLAB:validation:UnableToConvert', ...
-                    'steps must be a cell array.');
+                if isnumeric(v) && isempty(v)
+                    v = cell(size(v));
+                else
+                    error('MATLAB:validation:UnableToConvert', ...
+                        'steps must be a cell array.');
+                end
             end
             obj.steps = v;
         end
@@ -539,13 +544,12 @@ classdef Pipeline
 
     methods (Static, Access = private)
         function v = asChar(v)
-            % Coerce to char, as a 'char' property declaration does.
-            if isstring(v) && isscalar(v)
+            % Convert with char(), as a 'char' property declaration does.
+            try
                 v = char(v);
-            end
-            if ~ischar(v)
+            catch
                 error('MATLAB:validation:UnableToConvert', ...
-                    'Value must be a character vector or string scalar.');
+                    'Value must be convertible to char.');
             end
         end
     end

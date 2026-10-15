@@ -2228,7 +2228,7 @@ for i=1:numEx
    end
 
    if(isfield(ExFNIRS.data{i},'Aux'))
-        ExFNIRS.data{i}.info.emptyAux=isempty(ExFNIRS.data{i}.Aux)||isempty(fields(ExFNIRS.data{i}.Aux));
+        ExFNIRS.data{i}.info.emptyAux=isempty(ExFNIRS.data{i}.Aux)||isempty(fieldnames(ExFNIRS.data{i}.Aux));
    else
         ExFNIRS.data{i}.info.emptyAux=true;
    end
@@ -4367,7 +4367,7 @@ switch (ExFNIRS.settings.ChannelMode)
     
                 for i=1:length(ExFNIRS.curPreprocessedFNIR.fNIR)
                     if(pf2_base.isnestedfield(ExFNIRS.curPreprocessedFNIR.fNIR{i},'Aux'))
-                        curAuxNames=fields(ExFNIRS.curPreprocessedFNIR.fNIR{i}.Aux);
+                        curAuxNames=fieldnames(ExFNIRS.curPreprocessedFNIR.fNIR{i}.Aux);
                         if(any(~ismember(curAuxNames,auxNames)))
                             
                             for auxf=1:length(curAuxNames)

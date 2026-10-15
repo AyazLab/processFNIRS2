@@ -35,7 +35,7 @@ end
 tf = false(size(str));
 for i = 1:numel(str)
     for j = 1:numel(pat)
-        if ~isempty(strfind(str{i}, pat{j}))
+        if isempty(pat{j}) || ~isempty(strfind(str{i}, pat{j}))
             tf(i) = true;
             break;
         end
