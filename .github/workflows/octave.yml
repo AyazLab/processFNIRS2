@@ -29,7 +29,7 @@ permissions:
 
 env:
   OCTAVE_PACKAGES: datatypes control signal statistics
-  CACHE_VERSION: 2
+  CACHE_VERSION: 3
 
 jobs:
   octave-subset:
@@ -45,7 +45,11 @@ jobs:
         id: pkg-cache
         uses: actions/cache@v4
         with:
-          path: ~/.local/share/octave
+          # Package files and Octave's list of installed packages live in
+          # separate folders; both are needed for pkg to see a restore.
+          path: |
+            ~/.local/share/octave
+            ~/.config/octave
           key: octave-11.3.0-pkgs-${{ env.CACHE_VERSION }}-${{ env.OCTAVE_PACKAGES }}
 
       - name: Install missing Octave packages
