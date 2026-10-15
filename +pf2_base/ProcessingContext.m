@@ -599,9 +599,10 @@ classdef ProcessingContext < handle
         end
 
         function v = asRow(v)
-            % Reshape a vector or 0-by-0 empty to a row, as a '(1,:)' size
-            % declaration does; reject anything else.
-            if isvector(v) || isequal(size(v), [0 0])
+            % Reshape to a row when at most one dimension is non-singleton
+            % (including N-D arrays such as 1x1x3) or the input is 0x0, as
+            % a '(1,:)' size declaration does; reject anything else.
+            if sum(size(v) ~= 1) <= 1 || isequal(size(v), [0 0])
                 v = reshape(v, 1, []);
             else
                 error('MATLAB:validation:IncompatibleSize', ...

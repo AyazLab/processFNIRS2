@@ -72,6 +72,9 @@ classdef INI < handle
         PropToSection = struct();
         % Section data keyed by sanitized property name.
         Data = struct();
+        % True for an object loaded from a save made by the dynamicprops
+        % implementation until its sections are migrated on first use.
+        MigrationPending = false;
     end
 
     methods
@@ -84,6 +87,7 @@ classdef INI < handle
 
         function obj = set(obj, varargin)
             % Set one or more named properties (case-insensitive).
+            obj.ensureMigrated();
             for k = 1:2:numel(varargin)
                 name  = varargin{k};
                 value = varargin{k+1};
@@ -103,6 +107,7 @@ classdef INI < handle
         function value = get(obj, name)
             % Get a property by name (case-insensitive; accepts original
             % section names as well as sanitized identifiers).
+            obj.ensureMigrated();
             if nargin < 2
                 value = obj;
                 return;
@@ -121,6 +126,7 @@ classdef INI < handle
 
         function obj = read(obj, varargin)
             % Read an INI file into per-section fields.
+            obj.ensureMigrated();
             if nargin >= 2 && ~isempty(varargin{1})
                 obj.File = varargin{1};
             end
@@ -202,6 +208,7 @@ classdef INI < handle
 
         function obj = write(obj, varargin)
             % Serialize all sections to an INI file.
+            obj.ensureMigrated();
             if nargin >= 2 && ~isempty(varargin{1})
                 obj.File = varargin{1};
             end
@@ -241,6 +248,7 @@ classdef INI < handle
         function obj = add(obj, varargin)
             % Add one or more sections, each holding a struct (or struct-like
             % object). add(NAME1, S1, NAME2, S2, ...).
+            obj.ensureMigrated();
             for k = 1:2:numel(varargin)
                 sectionName = varargin{k};
                 value       = varargin{k+1};
@@ -252,6 +260,7 @@ classdef INI < handle
 
         function obj = remove(obj, varargin)
             % remove() clears all sections; remove(N1, N2, ...) removes named.
+            obj.ensureMigrated();
             if isempty(varargin)
                 obj.clearSections();
                 return;
@@ -272,23 +281,31 @@ classdef INI < handle
             if ~isscalar(obj)
                 return;
             end
-            mapFields = fieldnames(obj.PropToSection);
-            for k = 1:numel(mapFields)
-                if isfield(obj.Data, mapFields{k})
-                    fprintf('  [%s]\n', obj.PropToSection.(mapFields{k}));
-                    disp(obj.Data.(mapFields{k}));
+            obj.ensureMigrated();
+            for k = 1:numel(obj.Sections)
+                prop = obj.sectionProperty(obj.Sections{k});
+                if isempty(prop) || ~isfield(obj.Data, prop)
+                    continue;
+                end
+                fprintf('  [%s]\n', obj.Sections{k});
+                value = obj.Data.(prop);  % evalc runs without class access in Octave
+                text = strtrim(evalc('disp(value)'));
+                if ~isempty(text)
+                    fprintf('    %s\n', strrep(text, newline, [newline '    ']));
                 end
             end
         end
 
         function tf = isprop(obj, name)
             % True for the fixed properties and for registered sections.
+            obj.ensureMigrated();
             tf = obj.hasProp(name);
         end
 
         function varargout = subsref(obj, s)
             % obj.<Section>[...] reads section data; everything else
             % (fixed properties, method calls) uses built-in indexing.
+            s = pf2_base.external.INI.charSubs(s);
             if strcmp(s(1).type, '()') && numel(s) > 1
                 % Index into an object array, then continue on the result.
                 [varargout{1:nargout}] = subsref(builtin('subsref', obj, s(1)), s(2:end));
@@ -304,7 +321,8 @@ classdef INI < handle
                 return;
             end
             obj.checkPublicAccess(s);
-            if strcmp(s(1).type, '.') && ischar(s(1).subs) && isfield(obj.Data, s(1).subs)
+            obj.ensureMigrated();
+            if strcmp(s(1).type, '.') && isfield(obj.Data, s(1).subs)
                 value = obj.Data.(s(1).subs);
                 if numel(s) > 1
                     [varargout{1:nargout}] = subsref(value, s(2:end));
@@ -318,8 +336,20 @@ classdef INI < handle
 
         function obj = subsasgn(obj, s, value)
             % obj.<Section>[...] = V writes into an existing section.
+            s = pf2_base.external.INI.charSubs(s);
+            if strcmp(s(1).type, '()') && numel(s) > 1
+                % Assign through an indexed element; handle semantics
+                % update it in place.
+                subsasgn(builtin('subsref', obj, s(1)), s(2:end), value);
+                return;
+            end
             obj.checkPublicAccess(s);
-            if strcmp(s(1).type, '.') && ischar(s(1).subs) && isfield(obj.Data, s(1).subs)
+            if ~isscalar(obj)
+                obj = builtin('subsasgn', obj, s, value);
+                return;
+            end
+            obj.ensureMigrated();
+            if strcmp(s(1).type, '.') && isfield(obj.Data, s(1).subs)
                 if numel(s) > 1
                     value = subsasgn(obj.Data.(s(1).subs), s(2:end), value);
                 end
@@ -332,6 +362,7 @@ classdef INI < handle
         function n = numArgumentsFromSubscript(obj, s, context)
             % Section and property reads return a single value unless
             % trailing brace indexing expands to a comma-separated list.
+            s = pf2_base.external.INI.charSubs(s);
             if strcmp(s(1).type, '()') && numel(s) > 1
                 n = numArgumentsFromSubscript(builtin('subsref', obj, s(1)), s(2:end), context);
                 return;
@@ -340,6 +371,7 @@ classdef INI < handle
                 n = numel(obj);
                 return;
             end
+            obj.ensureMigrated();
             isDot = strcmp(s(1).type, '.') && ischar(s(1).subs);
             if isDot && isfield(obj.Data, s(1).subs)
                 base = obj.Data.(s(1).subs);
@@ -370,13 +402,14 @@ classdef INI < handle
         function obj = loadobj(s)
             % Rebuild objects saved by the dynamicprops implementation,
             % whose sections were stored as dynamic properties. MATLAB
-            % restores those as dynamic properties on load; their values
-            % are moved into Data. Sections that still have no data are
-            % re-read from File when it is available.
+            % re-attaches those dynamic properties only after loadobj
+            % returns, so the object is marked here and migrated on first
+            % use (see migrateLoadedSections).
             if isa(s, 'pf2_base.external.INI')
                 obj = s;
-                obj.recoverDynamicSections();
-                obj.restoreMissingSections();
+                mapFields = fieldnames(obj.PropToSection);
+                obj.MigrationPending = ~all(isfield(obj.Data, mapFields)) || ...
+                    any(cellfun(@(f) obj.isReserved(f), mapFields));
                 return;
             end
             obj = pf2_base.external.INI();
@@ -398,7 +431,16 @@ classdef INI < handle
                     obj.Data.(mapFields{k}) = s.(mapFields{k});
                 end
             end
-            obj.restoreMissingSections();
+            obj.MigrationPending = true;
+        end
+
+        function tf = isReservedName(name)
+            % True when NAME (after sanitizing) is a property or method
+            % name of this class and so cannot be addressed as cfg.(NAME).
+            % Callers that create sections from user-chosen names (method
+            % libraries) use this to reject such names up front.
+            tf = any(strcmp(pf2_base.external.INI.sanitizeName(name), ...
+                pf2_base.external.INI.reservedNames()));
         end
 
     end
@@ -413,14 +455,15 @@ classdef INI < handle
         function tf = isReserved(~, name)
             % True for names a section must not take: any property or
             % method of the class, including inherited handle methods.
-            persistent reserved
-            if isempty(reserved)
-                reserved = [{'File', 'CommentChar', 'NewLineChar', 'Sections', ...
-                    'PropToSection', 'Data'}, ...
-                    pf2_base.external.INI.privateMethodNames(), ...
-                    reshape(methods('pf2_base.external.INI'), 1, [])];
+            tf = any(strcmp(name, pf2_base.external.INI.reservedNames()));
+        end
+
+        function ensureMigrated(obj)
+            % Finish migrating an object loaded from an old save.
+            if obj.MigrationPending
+                obj.MigrationPending = false;
+                obj.migrateLoadedSections();
             end
-            tf = any(strcmp(name, reserved));
         end
 
         function tf = hasProp(obj, name)
@@ -436,34 +479,52 @@ classdef INI < handle
                 return;
             end
             name = s(1).subs;
-            if any(strcmp(name, {'PropToSection', 'Data'}))
+            [privProps, privMethods] = pf2_base.external.INI.nonPublicMembers();
+            if any(strcmp(name, privProps))
                 error('MATLAB:class:GetProhibited', ...
                     'Cannot access the ''%s'' property of class ''INI''.', name);
             end
-            if any(strcmp(name, pf2_base.external.INI.privateMethodNames()))
+            if any(strcmp(name, privMethods))
                 error('MATLAB:class:MethodRestricted', ...
                     'Cannot access method ''%s'' in class ''pf2_base.external.INI''.', name);
             end
         end
 
-        function recoverDynamicSections(obj)
-            % Move section values held in dynamic properties (objects
-            % saved by the dynamicprops implementation) into Data.
-            if pf2_base.env.isOctave()
-                return;
+        function migrateLoadedSections(obj)
+            % Move section values held in leftover dynamic properties into
+            % Data, re-key any section whose name is now reserved, then
+            % fill remaining gaps from File.
+            if ~pf2_base.env.isOctave()
+                mapFields = fieldnames(obj.PropToSection);
+                for k = 1:numel(mapFields)
+                    p = findprop(obj, mapFields{k});
+                    if pf2_base.external.INI.isDynamicProperty(p)
+                        if ~isfield(obj.Data, mapFields{k})
+                            obj.Data.(mapFields{k}) = obj.(mapFields{k});
+                        end
+                        delete(p);
+                    end
+                end
             end
             mapFields = fieldnames(obj.PropToSection);
             for k = 1:numel(mapFields)
-                p = findprop(obj, mapFields{k});
-                % Any property found under a section's name that is not
-                % declared by the class is a leftover dynamic property
-                % (meta.DynamicProperty, or matlab.metadata.DynamicProperty
-                % in newer releases).
-                if ~isempty(p) && ~obj.isReserved(mapFields{k})
-                    obj.Data.(mapFields{k}) = obj.(mapFields{k});
-                    delete(p);
+                if obj.isReserved(mapFields{k})
+                    name = obj.PropToSection.(mapFields{k});
+                    hasValue = isfield(obj.Data, mapFields{k});
+                    if hasValue
+                        value = obj.Data.(mapFields{k});
+                        obj.Data = rmfield(obj.Data, mapFields{k});
+                    end
+                    obj.PropToSection = rmfield(obj.PropToSection, mapFields{k});
+                    prop = obj.ensureSection(name);
+                    if hasValue
+                        obj.Data.(prop) = value;
+                    else
+                        obj.Data = rmfield(obj.Data, prop);
+                    end
                 end
             end
+            obj.restoreMissingSections();
         end
 
         function restoreMissingSections(obj)
@@ -557,7 +618,9 @@ classdef INI < handle
             end
             % Avoid collision with properties and method names, which
             % section lookup would otherwise shadow.
-            while obj.isReserved(prop)
+            % Also avoid a field already registered to a different section
+            % (sanitized names can coincide, and x_ prefixes can collide).
+            while obj.isReserved(prop) || isfield(obj.PropToSection, prop)
                 prop = ['x_' prop]; %#ok<AGROW>
             end
             if ~isfield(obj.Data, prop)
@@ -645,15 +708,62 @@ classdef INI < handle
 
     methods (Static, Access = private)
 
+        function names = reservedNames()
+            % Every property and method name of the class, including the
+            % handle methods, listed explicitly so the result is the same
+            % in MATLAB and Octave. A test checks it against the class.
+            names = [{'File', 'CommentChar', 'NewLineChar', 'Sections', ...
+                'PropToSection', 'Data', 'MigrationPending', ...
+                'INI', 'set', 'get', 'read', 'write', 'add', 'remove', ...
+                'disp', 'isprop', 'subsref', 'subsasgn', ...
+                'numArgumentsFromSubscript', 'loadobj', 'isReservedName', ...
+                'addlistener', 'delete', 'eq', 'findobj', 'findprop', ...
+                'ge', 'gt', 'isvalid', 'le', 'listener', 'lt', 'ne', ...
+                'notify', 'display', 'empty'}, pf2_base.external.INI.privateMethodNames()];
+        end
+
+        function [props, meths] = nonPublicMembers()
+            % Non-public property and method names, from the class
+            % metadata (MATLAB only; used by checkPublicAccess).
+            persistent cachedProps cachedMeths
+            if isempty(cachedProps)
+                mc = meta.class.fromName('pf2_base.external.INI');
+                isPub = @(a) ischar(a) && strcmp(a, 'public');
+                pl = mc.PropertyList;
+                cachedProps = {pl(~arrayfun(@(p) isPub(p.GetAccess), pl)).Name};
+                ml = mc.MethodList;
+                cachedMeths = {ml(~arrayfun(@(m) isPub(m.Access), ml)).Name};
+            end
+            props = cachedProps;
+            meths = cachedMeths;
+        end
+
+        function s = charSubs(s)
+            % Convert string-valued dynamic field names to char so the
+            % section lookup and the access guard see them.
+            for k = 1:numel(s)
+                if strcmp(s(k).type, '.') && isstring(s(k).subs)
+                    s(k).subs = char(s(k).subs);
+                end
+            end
+        end
+
+        function tf = isDynamicProperty(p)
+            % True for a dynamic property (class name differs by release).
+            tf = ~isempty(p) && (isa(p, 'meta.DynamicProperty') || ...
+                isa(p, 'matlab.metadata.DynamicProperty'));
+        end
+
         function names = privateMethodNames()
-            % Private instance and static method names, kept in sync with
-            % the private methods blocks of this file.
-            names = {'isPublicProp', 'isReserved', 'hasProp', ...
-                'checkPublicAccess', 'recoverDynamicSections', ...
+            % Private instance and static method names, listed explicitly
+            % so reservedNames is the same in MATLAB and Octave.
+            names = {'isPublicProp', 'isReserved', 'ensureMigrated', 'hasProp', ...
+                'checkPublicAccess', 'migrateLoadedSections', ...
                 'restoreMissingSections', 'resolveProperty', ...
                 'sectionProperty', 'ensureSection', 'clearSections', ...
                 'dropSectionByProperty', 'stripInlineComment', ...
-                'isCommentLine', 'privateMethodNames', ...
+                'isCommentLine', 'privateMethodNames', 'reservedNames', ...
+                'nonPublicMembers', 'charSubs', 'isDynamicProperty', ...
                 'looksLikeAssignment', 'parseValue', 'parseQuoted', ...
                 'bracketsBalanced', 'toLiteral', 'cellLiteral', ...
                 'numericLiteral', 'coerceToStruct', 'sanitizeName', ...

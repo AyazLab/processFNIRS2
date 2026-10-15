@@ -120,5 +120,62 @@ classdef INIFileTest < matlab.unittest.TestCase
             tc.verifyNotEmpty(r.Sections);
         end
 
+        function testReservedNamesCoverClassMembers(tc)
+            % Every property and method of the class (including inherited
+            % handle methods) must be reserved, so a section can never
+            % shadow one.
+            mc = meta.class.fromName('pf2_base.external.INI');
+            names = [{mc.PropertyList.Name}, {mc.MethodList.Name}];
+            for k = 1:numel(names)
+                tc.verifyTrue(pf2_base.external.INI.isReservedName(names{k}), ...
+                    sprintf('"%s" is not reserved', names{k}));
+            end
+        end
+
+        function testSectionNamedLikeMethodIsPrefixed(tc)
+            % A section named like a method or internal property keeps its
+            % original name for get/write but does not shadow the member.
+            c = pf2_base.external.INI('File', tc.TmpFile);
+            c.add('write', struct('x', 1), 'Data', struct('y', 2), 'x_write', struct('z', 3));
+            tc.verifyEqual(c.get('write'), struct('x', 1));
+            tc.verifyEqual(c.get('x_write'), struct('z', 3));
+            c.write();
+            r = pf2_base.external.INI('File', tc.TmpFile);
+            r.read();
+            tc.verifyEqual(sort(r.Sections), sort({'Data', 'write', 'x_write'}));
+            tc.verifyEqual(r.get('Data'), struct('y', 2));
+            tc.verifyEqual(r.get('write'), struct('x', 1));
+        end
+
+        function testPrivateMembersNotReachable(tc)
+            % The overloaded indexing runs with class access; it must not
+            % expose private members, including via string or indexed
+            % references.
+            c = pf2_base.external.INI('File', tc.TmpFile);
+            c.add('Info', struct('a', 1));
+            tc.verifyError(@() c.Data, 'MATLAB:class:GetProhibited');
+            tc.verifyError(@() c.("PropToSection"), 'MATLAB:class:GetProhibited');
+            tc.verifyError(@() c.clearSections(), 'MATLAB:class:MethodRestricted');
+            tc.verifyError(@() subsasgn(c, substruct('()', {1}, '.', 'Data'), 5), ...
+                'MATLAB:class:GetProhibited');
+            tc.verifyEqual(c.get('Info'), struct('a', 1));
+        end
+
+        function testStringAndIndexedSectionAccess(tc)
+            % String dynamic names and indexed element access reach sections.
+            c = pf2_base.external.INI('File', tc.TmpFile);
+            c.add('Info', struct('Name', 'A'));
+            tc.verifyEqual(c.("Info").Name, 'A');
+            c(1).Info.Name = 'B';
+            tc.verifyEqual(c.Info.Name, 'B');
+            d = pf2_base.external.INI('File', tc.TmpFile);
+            d.add('Info', struct('Name', 'C'));
+            arr = [c d];
+            tc.verifyEqual({arr.File}, {tc.TmpFile, tc.TmpFile});
+            tc.verifyEqual(arr(2).Info.Name, 'C');
+            arr(2).Info.Name = 'D';
+            tc.verifyEqual(d.Info.Name, 'D');
+        end
+
     end
 end

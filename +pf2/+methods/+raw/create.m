@@ -66,6 +66,12 @@ methodName = pf2_base.cleanNameForINI(methodName);
 if strcmpi(methodName, 'None')
     error('pf2:ReservedName', '''None'' is a reserved method name');
 end
+% Method libraries address methods as cfg.(methodName), which a property
+% or method name of the INI class would shadow.
+if pf2_base.external.INI.isReservedName(methodName)
+    error('pf2:ReservedName', ...
+        '''%s'' cannot be used as a method name (it is reserved by the methods library).', methodName);
+end
 
 % Check if method already exists
 methodExists = ismember(methodName, methodsLib.cfg.Sections);

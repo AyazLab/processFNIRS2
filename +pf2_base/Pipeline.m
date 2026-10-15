@@ -49,9 +49,10 @@ classdef Pipeline
         end
 
         function obj = set.steps(obj, v)
-            % As a 'cell' declaration: an empty numeric array becomes {}.
+            % As a 'cell' declaration: an empty numeric, char or logical
+            % array becomes an empty cell of the same size.
             if ~iscell(v)
-                if isnumeric(v) && isempty(v)
+                if isempty(v) && (isnumeric(v) || ischar(v) || islogical(v))
                     v = cell(size(v));
                 else
                     error('MATLAB:validation:UnableToConvert', ...
