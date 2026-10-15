@@ -13,7 +13,11 @@ name: octave
 #  - Regenerate the reference under MATLAB with
 #      pf2_base.tests.generateOctaveReference()
 #    whenever an intended change alters device geometry or processing output.
-#  - Octave packages are cached; bump CACHE_VERSION to force a reinstall.
+#  - Octave packages are installed with -local (the job runs as root, and a
+#    global install would land outside the cached folder) and cached. The
+#    install step installs any package missing after the cache restore, so a
+#    stale or empty cache cannot skip it; bump CACHE_VERSION to force a fresh
+#    cache.
 
 on:
   push:
@@ -25,7 +29,7 @@ permissions:
 
 env:
   OCTAVE_PACKAGES: datatypes control signal statistics
-  CACHE_VERSION: 1
+  CACHE_VERSION: 2
 
 jobs:
   octave-subset:
@@ -44,10 +48,9 @@ jobs:
           path: ~/.local/share/octave
           key: octave-11.3.0-pkgs-${{ env.CACHE_VERSION }}-${{ env.OCTAVE_PACKAGES }}
 
-      - name: Install Octave packages
-        if: steps.pkg-cache.outputs.cache-hit != 'true'
+      - name: Install missing Octave packages
         run: |
-          octave-cli --no-gui --eval "pkg install -forge ${OCTAVE_PACKAGES}"
+          octave-cli --no-gui --eval "need = strsplit(getenv('OCTAVE_PACKAGES')); have = cellfun(@(p) p.name, pkg('list'), 'UniformOutput', false); miss = setdiff(need, have); if isempty(miss), disp('all packages present'); else, printf('installing: %s\n', strjoin(miss, ' ')); pkg('install', '-local', '-forge', miss{:}); end"
 
       - name: List Octave packages
         run: octave-cli --no-gui --eval "pkg list"
