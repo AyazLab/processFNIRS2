@@ -768,7 +768,7 @@ function [outAuxStruct] = recursiveAuxResample(aux_in,flattenAux,segLength,cente
 
             if(auxFieldHasTime(f)||flattenAux)
                 if(exist('curTimeNames','var')&&~isempty(curTimeNames))
-                    outAuxStruct.(curFieldName)=table(t_aux_resample,'VariableNames',curTimeNames);
+                    outAuxStruct.(curFieldName)=table(t_aux_resample,'VariableNames',cellstr(curTimeNames));
                 else
                     outAuxStruct.(curFieldName)=table(t_aux_resample,'VariableNames',{'time'});
                 end
@@ -1053,7 +1053,7 @@ function [outAuxStruct] = recursiveAuxFlatten(aux_in,nir_time,parent_time_in)
             
 
             
-            outAuxStruct.(curFieldName)=table(t_aux,'VariableNames',curTimeNames);
+            outAuxStruct.(curFieldName)=table(t_aux,'VariableNames',cellstr(curTimeNames));
             
 
             

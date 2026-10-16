@@ -759,7 +759,7 @@ classdef Experiment < handle
 
             % Build channel labels as cell array
             if ~isempty(channels)
-                chLabels = cellstr(num2str(channels(:)));
+                chLabels = pf2_base.channelLabels(channels);
             else
                 chLabels = {};
             end
@@ -800,7 +800,7 @@ classdef Experiment < handle
 
             % Build channel labels as cell array
             if ~isempty(channels)
-                chLabels = cellstr(num2str(channels(:)));
+                chLabels = pf2_base.channelLabels(channels);
             else
                 chLabels = {};
             end

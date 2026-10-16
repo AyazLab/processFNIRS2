@@ -653,7 +653,7 @@ function [outAuxStruct] = recursiveAuxFlatten(aux_in,nir_time,parent_time_in)
             
 
             
-            outAuxStruct.(curFieldName)=table(t_aux,'VariableNames',curTimeNames);
+            outAuxStruct.(curFieldName)=table(t_aux,'VariableNames',cellstr(curTimeNames));
             
 
             

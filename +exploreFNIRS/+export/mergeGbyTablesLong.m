@@ -17,7 +17,8 @@ function mergedTables=mergeGbyTablesLong(gbyTables,bioMarkers,channelIndexes,tim
 %   times          - Time points to include (default: [] = all)
 %   exportAux      - Include auxiliary data (default: false)
 %   exportROI      - Include ROI-averaged data (default: false)
-%   channelLabels  - Cell array of channel name strings (default: numbers)
+%   channelLabels  - Cell array of channel name strings (default: zero-padded
+%                    numbers from pf2_base.channelLabels)
 %
 % Outputs:
 %   mergedTables   - Combined table in long format with columns:
@@ -53,7 +54,7 @@ if(nargin<3)
 end
 
 if(nargin<7)
-    channelLabels=cellstr(num2str(channelIndexes));
+    channelLabels=pf2_base.channelLabels(channelIndexes);
 else
     channelLabels=cellstr(channelLabels);
 end
@@ -117,7 +118,7 @@ for g=1:length(gbyTables)
     if(emptyChannelFlag&&exportFNIR)
         numCh=size(curBarGA.HbO.data,2);
         channelIndexes=1:numCh;
-        channelLabels=cellstr(num2str(channelIndexes(:)));
+        channelLabels=pf2_base.channelLabels(channelIndexes);
     elseif(exportFNIR)
        numCh=length(channelIndexes);
     else
