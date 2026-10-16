@@ -12,8 +12,9 @@ release is archived on [Zenodo](https://doi.org/10.5281/zenodo.23348858).
 | [10.5281/zenodo.23348858](https://doi.org/10.5281/zenodo.23348858) | processFNIRS2 as a whole; always resolves to the latest release | Citing the toolbox in general |
 | Version DOI, listed on the [Zenodo record](https://doi.org/10.5281/zenodo.23348858) under "Versions" | One specific release | Methods sections and code-availability statements, so readers can reproduce your analysis |
 
-Check the version you ran with `pf2_base.pf2version()`. For v1.2.0 the version
-DOI is [10.5281/zenodo.23348859](https://doi.org/10.5281/zenodo.23348859).
+Check the version you ran with `pf2_base.pf2version()`, then take that release's
+version DOI from the "Versions" list on the Zenodo record. Zenodo assigns each
+version DOI when the release is published, so the code itself cannot carry it.
 
 ## APA
 
