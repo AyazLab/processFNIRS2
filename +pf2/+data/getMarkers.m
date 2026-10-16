@@ -1,4 +1,4 @@
-function [markerTimes, tableMrkTimes, matchedPatterns] = getMarkers(fNIR, markersStart, markersEnd, opts)
+function [markerTimes, tableMrkTimes, matchedPatterns] = getMarkers(fNIR, varargin)
 % GETMARKERS Extract event marker times matching specified codes or patterns
 %
 % Searches fNIRS marker data to find events matching specified marker codes
@@ -60,18 +60,21 @@ function [markerTimes, tableMrkTimes, matchedPatterns] = getMarkers(fNIR, marker
 
 
 
-arguments
-    fNIR
-    markersStart {mustBeNumericOrLogical} = []
-    markersEnd {mustBeNumericOrLogical} = []
-    opts.markerPattern = []
-    opts.markerColumn {mustBeNumericOrLogical} = 2
-    opts.markerVariableName {mustBeText} = ''
-    opts.timeColumn {mustBeNumericOrLogical} = 1
-    opts.returnIndices {mustBeNumericOrLogical} = false
-    opts.exactMatch {mustBeNumericOrLogical} = false
-    opts.sortTimes {mustBeNumericOrLogical} = false
-end
+% Inputs are parsed with pf2_base.args rather than an arguments block so
+% the function also runs under GNU Octave. Spec rows are {name, default,
+% size, class, validators}.
+[markersStart, markersEnd, opts] = pf2_base.args.parse('getMarkers', varargin, {
+    'markersStart', ([]), '', '', {@mustBeNumericOrLogical}
+    'markersEnd',   ([]), '', '', {@mustBeNumericOrLogical}
+    }, {
+    'markerPattern',      ([]), '', '', {}
+    'markerColumn',       (2), '', '', {@mustBeNumericOrLogical}
+    'markerVariableName', (''), '', '', {@mustBeText}
+    'timeColumn',         (1), '', '', {@mustBeNumericOrLogical}
+    'returnIndices',      (false), '', '', {@mustBeNumericOrLogical}
+    'exactMatch',         (false), '', '', {@mustBeNumericOrLogical}
+    'sortTimes',          (false), '', '', {@mustBeNumericOrLogical}
+    });
 
 validfNIR_Input = @(x) (isstruct(x) && (isfield(x,'raw')||isfield(x,'time')||isfield(x,'info')));
 

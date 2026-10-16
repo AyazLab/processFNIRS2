@@ -1,4 +1,4 @@
-function fig = plotReport(qcReport, opts)
+function fig = plotReport(qcReport, varargin)
 % PLOTREPORT Visual QC dashboard showing all quality metrics
 %
 % Creates a 4-panel figure summarizing QC results across channels:
@@ -32,13 +32,16 @@ function fig = plotReport(qcReport, opts)
 %
 % See also: pf2.qc.pipeline.assess, pf2.qc.pipeline.report
 
-arguments
-    qcReport struct
-    opts.Visible {mustBeText} = 'on'
-    opts.SavePath {mustBeText} = ''
-    opts.TightLayout (1,1) logical = false
-    opts.Title {mustBeText} = 'QC Pipeline Report'
-end
+% Inputs are parsed with pf2_base.args rather than an arguments block so
+% the function also runs under GNU Octave. Spec rows are {name, default,
+% size, class, validators}.
+qcReport = pf2_base.args.check(qcReport, '', 'struct', {}, 'Invalid argument at position 1.');
+opts = pf2_base.args.parse('plotReport', varargin, {}, {
+    'Visible',     ('on'), '', '', {@mustBeText}
+    'SavePath',    (''), '', '', {@mustBeText}
+    'TightLayout', (false), '1,1', 'logical', {}
+    'Title',       ('QC Pipeline Report'), '', '', {@mustBeText}
+    });
 
 %% Validate
 assert(isfield(qcReport, 'pass'), 'pf2:qc:pipeline:badReport', ...

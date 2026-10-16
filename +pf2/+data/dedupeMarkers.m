@@ -1,4 +1,4 @@
-function out = dedupeMarkers(data, opts)
+function out = dedupeMarkers(data, varargin)
 % DEDUPEMARKERS Collapse near-duplicate markers firing within a tolerance
 %
 % Removes near-duplicate event markers, where "near-duplicate" means a row
@@ -73,11 +73,13 @@ function out = dedupeMarkers(data, opts)
 % See also: pf2.data.removeMarkers, pf2.data.defineBlocks, ...
 %           pf2.data.getMarkers, pf2_base.normalizeMarkers
 
-arguments
-    data
-    opts.Tolerance (1,1) {mustBeNumeric, mustBeNonnegative} = 0.05
-    opts.Verbose   (1,1) logical = true
-end
+% Inputs are parsed with pf2_base.args rather than an arguments block so
+% the function also runs under GNU Octave. Spec rows are {name, default,
+% size, class, validators}.
+opts = pf2_base.args.parse('dedupeMarkers', varargin, {}, {
+    'Tolerance', (0.05), '1,1', '', {@mustBeNumeric, @mustBeNonnegative}
+    'Verbose',   (true), '1,1', 'logical', {}
+    });
 
 % --- Cell array input: apply to each element ---
 if iscell(data)

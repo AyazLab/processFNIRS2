@@ -23,7 +23,7 @@ classdef Device
 %
 % See also: pf2_base.loadDeviceCfg, pf2_base.resolveDeviceFromData
 
-    properties (SetAccess = immutable)
+    properties (SetAccess = private)
         name            % Config name, e.g. 'fNIR_Devices_fNIR2000'
         manufacturer    % e.g. 'fNIR Devices'
         model           % e.g. 'Model 2000'
@@ -336,6 +336,9 @@ classdef Device
                 dev = [];
                 return;
             end
+
+            % Under GNU Octave, load packages and shims (no-op in MATLAB)
+            pf2_base.env.ensureOctaveCompat();
 
             % Resolve config name from data struct
             if isstruct(nameOrData)

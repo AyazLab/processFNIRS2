@@ -1,4 +1,4 @@
-function [vals, info] = auxOnGrid(data, name, opts)
+function [vals, info] = auxOnGrid(data, name, varargin)
 % AUXONGRID Resample a named auxiliary signal onto a target time base
 %
 % Returns an auxiliary signal aligned to an arbitrary time grid (the fNIRS
@@ -50,16 +50,19 @@ function [vals, info] = auxOnGrid(data, name, opts)
 %
 % See also: pf2_base.normalizeAux, pf2_base.auxSignalType, pf2.data.resample
 
-arguments
-    data {mustBeA(data, 'struct')}
-    name {mustBeText}
-    opts.Time {mustBeNumeric} = []
-    opts.Channels = []
-    opts.Method = 'linear'
-    opts.Offset (1,1) {mustBeNumeric} = 0
-    opts.AntiAlias (1,1) logical = true
-    opts.MaxGap (1,1) {mustBeNumeric, mustBePositive} = Inf
-end
+% Inputs are parsed with pf2_base.args rather than an arguments block so
+% the function also runs under GNU Octave. Spec rows are {name, default,
+% size, class, validators}.
+data = pf2_base.args.check(data, '', '', {@(v) mustBeA(v, 'struct')}, 'Invalid argument at position 1.');
+name = pf2_base.args.check(name, '', '', {@mustBeText}, 'Invalid argument at position 2.');
+opts = pf2_base.args.parse('auxOnGrid', varargin, {}, {
+    'Time',      ([]), '', '', {@mustBeNumeric}
+    'Channels',  ([]), '', '', {}
+    'Method',    ('linear'), '', '', {}
+    'Offset',    (0), '1,1', '', {@mustBeNumeric}
+    'AntiAlias', (true), '1,1', 'logical', {}
+    'MaxGap',    (Inf), '1,1', '', {@mustBeNumeric, @mustBePositive}
+    });
 
 name = char(string(name));
 method = char(string(opts.Method));

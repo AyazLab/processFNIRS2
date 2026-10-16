@@ -83,10 +83,10 @@ pf2_base.ensureStatsFallbacks();
 if(~isfield(PF2,'defaultRootPath'))
     [pF2_folder,~,~] = fileparts(mfilename('fullpath'));
     PF2.defaultRootPath=pf2_base.pf2_defaultRootPath();
-    curdir=cd;
-    cd(PF2.defaultRootPath);
-    addpath(PF2.defaultRootPath,'base_functions','functions','GUI');
-    cd(curdir);
+    % Absolute paths: Octave's addpath stores relative entries verbatim, so
+    % they would stop resolving after leaving the root folder.
+    rootDir=PF2.defaultRootPath;
+    addpath(rootDir,fullfile(rootDir,'base_functions'),fullfile(rootDir,'functions'),fullfile(rootDir,'GUI'));
 end
 
 PF2.defaultOxyMethodsPath=sprintf('%s/pf2_oxy_methods_stored_processFNIRS2.cfg',prefdir);

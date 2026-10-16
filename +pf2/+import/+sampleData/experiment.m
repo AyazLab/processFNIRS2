@@ -72,7 +72,7 @@ end
 stage = validatestring(stage, {'raw', 'blocks', 'extracted', 'aligned'});
 
 % Process sample data once
-raw = pf2.import.sampleData.fNIR2000();
+raw = pf2.import.sampleData('fNIR2000');  % by-name form also works under Octave
 processed = processFNIRS2(raw);
 
 % Experiment parameters

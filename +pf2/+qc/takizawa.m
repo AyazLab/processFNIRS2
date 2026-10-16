@@ -1,4 +1,4 @@
-function report = takizawa(data, opts)
+function report = takizawa(data, varargin)
 % TAKIZAWA Automatic channel quality assessment using Takizawa criteria
 %
 % Evaluates four rules derived from Takizawa et al. (2008, 2014) to
@@ -88,19 +88,22 @@ function report = takizawa(data, opts)
 %
 % See also: pf2.qc.pipeline.assess, pf2.qc.sci, pf2_TakizawaRejection
 
-arguments
-    data struct
-    opts.Strict (1,1) logical = false
-    opts.HFNoiseRatio (1,1) {mustBeNumeric} = 4
-    opts.HFNoiseWindow (1,1) {mustBeNumeric} = 15
-    opts.HFNoiseFraction (1,1) {mustBeNumeric} = 0.5
-    opts.LFThreshold (1,1) {mustBeNumeric} = 0.3
-    opts.CorrThreshold (1,1) {mustBeNumeric} = -0.9
-    opts.BodyMovementThreshold (1,1) {mustBeNumeric} = 0.5
-    opts.BodyMovementWindow (1,1) {mustBeNumeric} = 2
-    opts.ProtocolDuration (1,1) {mustBeNumeric} = 90
-    opts.IncludeBandPower (1,1) logical = false
-end
+% Inputs are parsed with pf2_base.args rather than an arguments block so
+% the function also runs under GNU Octave. Spec rows are {name, default,
+% size, class, validators}.
+data = pf2_base.args.check(data, '', 'struct', {}, 'Invalid argument at position 1.');
+opts = pf2_base.args.parse('takizawa', varargin, {}, {
+    'Strict',                (false), '1,1', 'logical', {}
+    'HFNoiseRatio',          (4), '1,1', '', {@mustBeNumeric}
+    'HFNoiseWindow',         (15), '1,1', '', {@mustBeNumeric}
+    'HFNoiseFraction',       (0.5), '1,1', '', {@mustBeNumeric}
+    'LFThreshold',           (0.3), '1,1', '', {@mustBeNumeric}
+    'CorrThreshold',         (-0.9), '1,1', '', {@mustBeNumeric}
+    'BodyMovementThreshold', (0.5), '1,1', '', {@mustBeNumeric}
+    'BodyMovementWindow',    (2), '1,1', '', {@mustBeNumeric}
+    'ProtocolDuration',      (90), '1,1', '', {@mustBeNumeric}
+    'IncludeBandPower',      (false), '1,1', 'logical', {}
+    });
 
 %% Resolve Hb data
 if isfield(data, 'HbO') && isfield(data, 'HbR')

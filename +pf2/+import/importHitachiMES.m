@@ -137,7 +137,7 @@ header=[];
 delimiter='\t';
 
 while(~feof(fid)&&(ischar(lineF))&&~strcmp(lineF,'Data'))
-    [lineSplit,idx]=strsplit(lineF,delimiter);
+    lineSplit=strsplit(lineF,delimiter);
     if(length(lineSplit)>1)
        varField=renameValid(strtrim(lineSplit{1}));
        header.(varField)=strtrim(lineF(length(lineSplit{1})+2:end));
@@ -151,7 +151,7 @@ if(isempty(header))
     frewind(fid);
     lineF=fgetl(fid);
     while(~feof(fid)&&(ischar(lineF))&&~strcmp(lineF,'Data'))
-        [lineSplit,idx]=strsplit(lineF,delimiter);
+        lineSplit=strsplit(lineF,delimiter);
         if(length(lineSplit)>1)
            varField=renameValid(strtrim(lineSplit{1}));
            header.(varField)=strtrim(lineF(length(lineSplit{1})+2:end));

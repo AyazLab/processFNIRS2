@@ -75,8 +75,13 @@ classdef GUIContext < pf2_base.ProcessingContext
     end
 
     methods
-        function obj = GUIContext()
+        function obj = GUIContext(varargin)
             % GUICONTEXT Create a new GUI context with defaults
+            % The only accepted input is COPY_TOKEN, passed by copy().
+            if nargin > 1 || (nargin == 1 && ~isequal(varargin{1}, ...
+                    pf2_base.ProcessingContext.COPY_TOKEN))
+                error('MATLAB:TooManyInputs', 'Too many input arguments.');
+            end
             obj@pf2_base.ProcessingContext();
         end
 

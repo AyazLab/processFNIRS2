@@ -1,4 +1,4 @@
-function [outFNIR, pFit] = resample(fNIR, segmentLength, blLength, opts)
+function [outFNIR, pFit] = resample(fNIR, varargin)
 % RESAMPLE Downsample and time-average fNIRS data
 %
 % Resamples fNIRS data to a lower sampling rate by averaging samples within
@@ -60,21 +60,24 @@ function [outFNIR, pFit] = resample(fNIR, segmentLength, blLength, opts)
 %
 % See also: pf2.data.split, pf2.data.setT0, pf2.data.concatenate
 
-arguments
-    fNIR
-    segmentLength (1,1) {mustBeNumeric, mustBePositive} = 1
-    blLength {mustBeNumeric} = []
-    opts.blfNIR = []
-    opts.centerOnT0 (1,1) logical = false
-    opts.timeOutMode {mustBeMember(opts.timeOutMode, {'mid','start','end'})} = 'start'
-    opts.nanRejectionLevel (1,1) {mustBeNumeric, mustBeNonnegative} = 0.7
-    opts.averageAux (1,1) logical = false
-    opts.flattenAux (1,1) logical = false
-    opts.trimAux (1,1) logical = false
-    opts.polyDegree (1,1) {mustBeNumeric, mustBeNonnegative} = 1
-    opts.centerOnTime {mustBeNumeric} = NaN
-    opts.specifiedTimepoints {mustBeNumeric} = []
-end
+% Inputs are parsed with pf2_base.args rather than an arguments block so
+% the function also runs under GNU Octave. Spec rows are {name, default,
+% size, class, validators}.
+[segmentLength, blLength, opts] = pf2_base.args.parse('resample', varargin, {
+    'segmentLength', (1), '1,1', '', {@mustBeNumeric, @mustBePositive}
+    'blLength',      ([]), '', '', {@mustBeNumeric}
+    }, {
+    'blfNIR',              ([]), '', '', {}
+    'centerOnT0',          (false), '1,1', 'logical', {}
+    'timeOutMode',         ('start'), '', '', {@(v) mustBeMember(v, {'mid','start','end'})}
+    'nanRejectionLevel',   (0.7), '1,1', '', {@mustBeNumeric, @mustBeNonnegative}
+    'averageAux',          (false), '1,1', 'logical', {}
+    'flattenAux',          (false), '1,1', 'logical', {}
+    'trimAux',             (false), '1,1', 'logical', {}
+    'polyDegree',          (1), '1,1', '', {@mustBeNumeric, @mustBeNonnegative}
+    'centerOnTime',        (NaN), '', '', {@mustBeNumeric}
+    'specifiedTimepoints', ([]), '', '', {@mustBeNumeric}
+    });
 
 segLength=segmentLength; % How long is each segment, ie: 1 sample
 blfNIR=opts.blfNIR; % Separate baseline source struct/array (mutated as a local below)
@@ -404,7 +407,7 @@ for b = 1:length(bioMlist)
     end
 end
 
-if(isfield(fNIR,'Aux')&&~isempty(fNIR.Aux)&&length(fields(fNIR.Aux))>1)
+if(isfield(fNIR,'Aux')&&~isempty(fNIR.Aux)&&length(fieldnames(fNIR.Aux))>1)
     if(averageAux)
         % Attempts to resample any field (and align with fNIRS)
             % criteria:
@@ -437,7 +440,7 @@ if(isfield(fNIR,'Aux')&&~isempty(fNIR.Aux)&&length(fields(fNIR.Aux))>1)
         validTimeFields={'time','t','Time'};
     
         if(outFNIR.Aux.flattened)
-            auxTrimFields=fields(outFNIR.Aux);
+            auxTrimFields=fieldnames(outFNIR.Aux);
     
             for atIdx=1:length(auxTrimFields)
                 curVar=outFNIR.Aux.(auxTrimFields{atIdx});
@@ -462,7 +465,7 @@ end
 
 
 validFields=pf2_base.pf2_getFNIRSfields();
-fdataFields=fields(fNIR);  % Copy known fields
+fdataFields=fieldnames(fNIR);  % Copy known fields
 for fieldIdx=1:length(fdataFields)
    memberIdx=ismember(validFields,fdataFields{fieldIdx});
    if(any(memberIdx)&&~strcmp(fdataFields{fieldIdx},'time')...
@@ -519,7 +522,7 @@ end
 end
 
 function [outAuxStruct] = recursiveAuxResample(aux_in,flattenAux,segLength,centerOnTime,nir_time,fTimeInd,nanRejectionLevel,parent_time_in,parentTimeInd)
-    auxFields=fields(aux_in);
+    auxFields=fieldnames(aux_in);
 
     if(nargin<8)
         parent_time_in=[];
@@ -765,7 +768,7 @@ function [outAuxStruct] = recursiveAuxResample(aux_in,flattenAux,segLength,cente
 
             if(auxFieldHasTime(f)||flattenAux)
                 if(exist('curTimeNames','var')&&~isempty(curTimeNames))
-                    outAuxStruct.(curFieldName)=table(t_aux_resample,'VariableNames',curTimeNames);
+                    outAuxStruct.(curFieldName)=table(t_aux_resample,'VariableNames',cellstr(curTimeNames));
                 else
                     outAuxStruct.(curFieldName)=table(t_aux_resample,'VariableNames',{'time'});
                 end
@@ -863,7 +866,7 @@ function [outAuxStruct] = recursiveAuxResample(aux_in,flattenAux,segLength,cente
             else
                 struct2unpack=recursiveAuxResample(aux_in.(curFieldName),true,segLength,centerOnTime,nir_time,fTimeInd,nanRejectionLevel,local_time,localTimeInd);
 
-                fields2assign=fields(struct2unpack);
+                fields2assign=fieldnames(struct2unpack);
                 for f2=1:length(fields2assign) 
                     subFieldName=fields2assign{f2};
                     newFieldName=sprintf('%s_%s',curFieldName,subFieldName);
@@ -880,7 +883,7 @@ function [outAuxStruct] = recursiveAuxResample(aux_in,flattenAux,segLength,cente
 end
 
 function [outAuxStruct] = recursiveAuxFlatten(aux_in,nir_time,parent_time_in)
-    auxFields=fields(aux_in);
+    auxFields=fieldnames(aux_in);
 
     if(nargin<3)
         parent_time_in=[];
@@ -1050,7 +1053,7 @@ function [outAuxStruct] = recursiveAuxFlatten(aux_in,nir_time,parent_time_in)
             
 
             
-            outAuxStruct.(curFieldName)=table(t_aux,'VariableNames',curTimeNames);
+            outAuxStruct.(curFieldName)=table(t_aux,'VariableNames',cellstr(curTimeNames));
             
 
             
@@ -1113,7 +1116,7 @@ function [outAuxStruct] = recursiveAuxFlatten(aux_in,nir_time,parent_time_in)
             
             struct2unpack=recursiveAuxFlatten(aux_in.(curFieldName),nir_time,local_time);
 
-            fields2assign=fields(struct2unpack);
+            fields2assign=fieldnames(struct2unpack);
             for f2=1:length(fields2assign) 
                 subFieldName=fields2assign{f2};
                 newFieldName=sprintf('%s_%s',curFieldName,subFieldName);

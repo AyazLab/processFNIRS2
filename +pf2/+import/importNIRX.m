@@ -408,7 +408,7 @@ for i=1:size(files,1)
         fNIR.info.probeInfo.read();
         pInfo=fNIR.info.probeInfo;
         
-        if(ismember('Markers',fields(pInfo))&&isfield(pInfo.Markers,'Events'))
+        if(ismember('Markers',fieldnames(pInfo))&&isfield(pInfo.Markers,'Events'))
             NIRX_mrk=strsplit(pInfo.Markers.Events,'\n');
             numL=0;
             for l=1:length(NIRX_mrk)
@@ -423,19 +423,19 @@ for i=1:size(files,1)
             end
         end
         
-        if(ismember('ImagingParameters',fields(pInfo))&&isfield(pInfo.ImagingParameters,'SamplingRate'))
+        if(ismember('ImagingParameters',fieldnames(pInfo))&&isfield(pInfo.ImagingParameters,'SamplingRate'))
             fNIR.fs=pInfo.ImagingParameters.SamplingRate;
             fNIR.info.SamplingRate=fNIR.fs;
         end
         
-        if(ismember('ImagingParameters',fields(pInfo))&&isfield(pInfo.ImagingParameters,'Wavelengths'))
+        if(ismember('ImagingParameters',fieldnames(pInfo))&&isfield(pInfo.ImagingParameters,'Wavelengths'))
             s=pInfo.ImagingParameters.Wavelengths;
             s(s==''''|s=='"')=[];
             s=strsplit(s,'\t');
             fNIR.info.curWv=str2double(s);
         end
         
-        if(ismember('DataStructure',fields(pInfo))&&isfield(pInfo.DataStructure,'S_D_Key'))
+        if(ismember('DataStructure',fieldnames(pInfo))&&isfield(pInfo.DataStructure,'S_D_Key'))
             s=pInfo.DataStructure.S_D_Key;
             s(s==''''|s=='"')=[];
             sdkeyLines=strsplit(s,',');
@@ -444,7 +444,7 @@ for i=1:size(files,1)
             end
         end
         
-        if(ismember('DataStructure',fields(pInfo))&&isfield(pInfo.DataStructure,'S_D_Mask'))
+        if(ismember('DataStructure',fieldnames(pInfo))&&isfield(pInfo.DataStructure,'S_D_Mask'))
             s=pInfo.DataStructure.S_D_Mask;
             s(s==''''|s=='"')=[];
             sdmaskLines=strsplit(s,'\n');
@@ -458,27 +458,27 @@ for i=1:size(files,1)
             end
         end
         
-        if(ismember('ChannelsDistance',fields(pInfo))&&isfield(pInfo.ChannelsDistance,'ChanDis'))
+        if(ismember('ChannelsDistance',fieldnames(pInfo))&&isfield(pInfo.ChannelsDistance,'ChanDis'))
             s=pInfo.ChannelsDistance.ChanDis;
             s(s==''''|s=='"')=[];
             splitLine=strsplit(s,'\t');
             fNIR.info.ChanDis=str2double(splitLine)/10; %convert to cm
         end
         
-        if(ismember('GeneralInfo',fields(pInfo))&&isfield(pInfo.GeneralInfo,'Subject'))
+        if(ismember('GeneralInfo',fieldnames(pInfo))&&isfield(pInfo.GeneralInfo,'Subject'))
             fNIR.info.SubjectID=pInfo.GeneralInfo.Subject;
         end
         
-        if(ismember('GeneralInfo',fields(pInfo))&&isfield(pInfo.GeneralInfo,'FileName'))
+        if(ismember('GeneralInfo',fieldnames(pInfo))&&isfield(pInfo.GeneralInfo,'FileName'))
             fNIR.info.Filename=pInfo.GeneralInfo.FileName;
         end
         
-        if(ismember('GeneralInfo',fields(pInfo))&&isfield(pInfo.GeneralInfo,'Date'))
+        if(ismember('GeneralInfo',fieldnames(pInfo))&&isfield(pInfo.GeneralInfo,'Date'))
             fNIR.info.Date=pInfo.GeneralInfo.Date;
             fNIR.info.StartDateTime=datetime(pInfo.GeneralInfo.Date);
         end
         
-        if(ismember('GeneralInfo',fields(pInfo))&&isfield(pInfo.GeneralInfo,'Time'))
+        if(ismember('GeneralInfo',fieldnames(pInfo))&&isfield(pInfo.GeneralInfo,'Time'))
             fNIR.info.Time=pInfo.GeneralInfo.Time;
             %fNIR.info.StartDateTime=pInfo.GeneralInfo.Time;
         end

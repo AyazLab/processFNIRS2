@@ -1,4 +1,4 @@
-function [feat, info] = respFeatures(x, fs, opts)
+function [feat, info] = respFeatures(x, fs, varargin)
 % RESPFEATURES Derive respiration rate and RVT from a respiration waveform
 %
 % Detects breaths in a respiration signal (belt / RIP / derived) and returns
@@ -53,13 +53,16 @@ function [feat, info] = respFeatures(x, fs, opts)
 %
 % See also: pf2.data.aux.heartRateFrom, pf2_base.auxSignalType, pf2.data.auxOnGrid
 
-arguments
-    x {mustBeNumeric}
-    fs {mustBeNumeric, mustBeScalarOrEmpty, mustBePositive}
-    opts.Band {mustBeNumeric} = [0.1 0.5]
-    opts.MinRate {mustBeNumeric, mustBeScalarOrEmpty, mustBePositive} = 5
-    opts.MaxRate {mustBeNumeric, mustBeScalarOrEmpty, mustBePositive} = 60
-end
+% Inputs are parsed with pf2_base.args rather than an arguments block so
+% the function also runs under GNU Octave. Spec rows are {name, default,
+% size, class, validators}.
+x = pf2_base.args.check(x, '', '', {@mustBeNumeric}, 'Invalid argument at position 1.');
+fs = pf2_base.args.check(fs, '', '', {@mustBeNumeric, @mustBeScalarOrEmpty, @mustBePositive}, 'Invalid argument at position 2.');
+opts = pf2_base.args.parse('respFeatures', varargin, {}, {
+    'Band',    ([0.1 0.5]), '', '', {@mustBeNumeric}
+    'MinRate', (5), '', '', {@mustBeNumeric, @mustBeScalarOrEmpty, @mustBePositive}
+    'MaxRate', (60), '', '', {@mustBeNumeric, @mustBeScalarOrEmpty, @mustBePositive}
+    });
 band = opts.Band;
 maxRate = opts.MaxRate;
 

@@ -1,4 +1,4 @@
-function report = assess(data, opts)
+function report = assess(data, varargin)
 % ASSESS Standalone fNIRS channel quality assessment pipeline
 %
 % Performs lightweight internal processing on raw fNIRS data and runs
@@ -58,19 +58,22 @@ function report = assess(data, opts)
 % See also: pf2.qc.pipeline.apply, pf2.qc.pipeline.report,
 %           pf2.qc.pipeline.plotReport, pf2.qc.sci, pf2.qc.powerSpectrum
 
-arguments
-    data struct
-    opts.Checks {mustBeA(opts.Checks, 'cell')} = {'saturation','sci','cardiac','cov','takizawa'}
-    opts.SaturationThreshold (1,1) {mustBeNumeric} = 0.1
-    opts.SCIThreshold (1,1) {mustBeNumeric} = 0.75
-    opts.CardiacBand {mustBeNumeric} = [0.5, 2.5]
-    opts.CardiacSNR (1,1) {mustBeNumeric} = 3
-    opts.CoVThreshold (1,1) {mustBeNumeric} = 0.2
-    opts.LPFCutoff (1,1) {mustBeNumeric} = 0.1
-    opts.TakizawaStrict (1,1) logical = false
-    opts.Wavelengths {mustBeNumeric} = []
-    opts.ChannelNumbers {mustBeNumeric} = []
-end
+% Inputs are parsed with pf2_base.args rather than an arguments block so
+% the function also runs under GNU Octave. Spec rows are {name, default,
+% size, class, validators}.
+data = pf2_base.args.check(data, '', 'struct', {}, 'Invalid argument at position 1.');
+opts = pf2_base.args.parse('assess', varargin, {}, {
+    'Checks',              ({'saturation','sci','cardiac','cov','takizawa'}), '', '', {@(v) mustBeA(v, 'cell')}
+    'SaturationThreshold', (0.1), '1,1', '', {@mustBeNumeric}
+    'SCIThreshold',        (0.75), '1,1', '', {@mustBeNumeric}
+    'CardiacBand',         ([0.5, 2.5]), '', '', {@mustBeNumeric}
+    'CardiacSNR',          (3), '1,1', '', {@mustBeNumeric}
+    'CoVThreshold',        (0.2), '1,1', '', {@mustBeNumeric}
+    'LPFCutoff',           (0.1), '1,1', '', {@mustBeNumeric}
+    'TakizawaStrict',      (false), '1,1', 'logical', {}
+    'Wavelengths',         ([]), '', '', {@mustBeNumeric}
+    'ChannelNumbers',      ([]), '', '', {@mustBeNumeric}
+    });
 
 %% Validate required fields
 assert(isfield(data, 'raw'), 'pf2:qc:pipeline:noRaw', ...

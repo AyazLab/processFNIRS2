@@ -2,7 +2,7 @@
 
 ![MATLAB](https://img.shields.io/badge/MATLAB-R2025b-blue.svg)
 ![License](https://img.shields.io/badge/license-GPLv3-blue.svg)
-![Version](https://img.shields.io/badge/version-1.2.0-green.svg)
+![Version](https://img.shields.io/badge/version-1.2.1-green.svg)
 [![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.23348858.svg)](https://doi.org/10.5281/zenodo.23348858)
 
 A modular MATLAB toolbox for functional Near-Infrared Spectroscopy (fNIRS) data
@@ -353,7 +353,7 @@ licenses are documented in [THIRD_PARTY_LICENSES.md](THIRD_PARTY_LICENSES.md).
 If you use processFNIRS2 in your research, please cite the software
 (machine-readable metadata is in [CITATION.cff](CITATION.cff)):
 
-> Curtin, A., & Ayaz, H. (2026). *processFNIRS2* (version 1.2.0)
+> Curtin, A., & Ayaz, H. (2026). *processFNIRS2* (version 1.2.1)
 > [Computer software]. Zenodo. https://doi.org/10.5281/zenodo.23348858
 
 The DOI above always resolves to the latest release. To cite the exact version

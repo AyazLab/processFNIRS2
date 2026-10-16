@@ -1,4 +1,4 @@
-function blocks = slidingWindows(data, opts)
+function blocks = slidingWindows(data, varargin)
 % SLIDINGWINDOWS Define fixed-length sliding-window blocks over a recording
 %
 % Tiles a continuous recording with fixed-length time windows at a regular
@@ -94,18 +94,20 @@ function blocks = slidingWindows(data, opts)
 %
 % See also: pf2.data.defineBlocks, pf2.data.extractBlocks, pf2.data.split
 
-arguments
-    data
-    opts.Length          {mustBeNumeric, mustBeScalarOrEmpty, mustBePositive} = []
-    opts.Step            {mustBeNumeric, mustBeScalarOrEmpty, mustBePositive} = []
-    opts.Overlap         {mustBeNumeric, mustBeScalarOrEmpty, mustBeNonnegative, mustBeLessThan(opts.Overlap, 1)} = []
-    opts.Start           {mustBeNumeric, mustBeScalarOrEmpty} = []
-    opts.End             {mustBeNumeric, mustBeScalarOrEmpty} = []
-    opts.Partial         (1,1) logical = false
-    opts.Condition       {mustBeText} = ''
-    opts.ConditionField  {mustBeText} = 'Condition'
-    opts.Embed           (1,1) logical = true
-end
+% Inputs are parsed with pf2_base.args rather than an arguments block so
+% the function also runs under GNU Octave. Spec rows are {name, default,
+% size, class, validators}.
+opts = pf2_base.args.parse('slidingWindows', varargin, {}, {
+    'Length',         ([]), '', '', {@mustBeNumeric, @mustBeScalarOrEmpty, @mustBePositive}
+    'Step',           ([]), '', '', {@mustBeNumeric, @mustBeScalarOrEmpty, @mustBePositive}
+    'Overlap',        ([]), '', '', {@mustBeNumeric, @mustBeScalarOrEmpty, @mustBeNonnegative, @(v) mustBeLessThan(v, 1)}
+    'Start',          ([]), '', '', {@mustBeNumeric, @mustBeScalarOrEmpty}
+    'End',            ([]), '', '', {@mustBeNumeric, @mustBeScalarOrEmpty}
+    'Partial',        (false), '1,1', 'logical', {}
+    'Condition',      (''), '', '', {@mustBeText}
+    'ConditionField', ('Condition'), '', '', {@mustBeText}
+    'Embed',          (true), '1,1', 'logical', {}
+    });
 
 % --- Cell array input: apply to each element (requires Embed) ---
 if iscell(data)

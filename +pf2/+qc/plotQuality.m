@@ -1,4 +1,4 @@
-function fig = plotQuality(qcResult, opts)
+function fig = plotQuality(qcResult, varargin)
 % PLOTQUALITY Visualize fNIRS signal quality metrics
 %
 % Dispatches based on the type of QC result passed in. Produces an SCI bar
@@ -45,14 +45,17 @@ function fig = plotQuality(qcResult, opts)
 %
 % See also: pf2.qc.sci, pf2.qc.powerSpectrum
 
-arguments
-    qcResult struct
-    opts.Channels {mustBeNumeric} = []
-    opts.Layout = 'overlay'
-    opts.Visible = 'on'
-    opts.SavePath = ''
-    opts.Title = ''
-end
+% Inputs are parsed with pf2_base.args rather than an arguments block so
+% the function also runs under GNU Octave. Spec rows are {name, default,
+% size, class, validators}.
+qcResult = pf2_base.args.check(qcResult, '', 'struct', {}, 'Invalid argument at position 1.');
+opts = pf2_base.args.parse('plotQuality', varargin, {}, {
+    'Channels', ([]), '', '', {@mustBeNumeric}
+    'Layout',   ('overlay'), '', '', {}
+    'Visible',  ('on'), '', '', {}
+    'SavePath', (''), '', '', {}
+    'Title',    (''), '', '', {}
+    });
 
 %% Dispatch based on result type
 if isfield(qcResult, 'sci')

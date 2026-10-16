@@ -1,4 +1,4 @@
-function [series, t] = hrvSeries(signal, fs, opts)
+function [series, t] = hrvSeries(signal, fs, varargin)
 % HRVSERIES Time-resolved HRV metrics via a sliding window over a waveform
 %
 % Computes standard HRV metrics in successive overlapping windows of a PPG
@@ -130,19 +130,22 @@ function [series, t] = hrvSeries(signal, fs, opts)
 %           pf2.data.aux.addFeature, pf2.data.auxOnGrid,
 %           pf2.data.slidingWindows
 
-arguments
-    signal {mustBeNumeric, mustBeNonempty}
-    fs {mustBeNumeric, mustBeScalarOrEmpty, mustBePositive}
-    opts.Window     {mustBeNumeric, mustBeScalarOrEmpty, mustBePositive} = 60
-    opts.Step       {mustBeNumeric, mustBeScalarOrEmpty, mustBePositive} = []
-    opts.Overlap    {mustBeNumeric, mustBeScalarOrEmpty} = []
-    opts.Metric     = 'all'
-    opts.MinBeats   {mustBeNumeric, mustBeScalarOrEmpty} = []
-    opts.Band       {mustBeNumeric} = [0.5 5]
-    opts.LFBand     {mustBeNumeric} = [0.04 0.15]
-    opts.HFBand     {mustBeNumeric} = [0.15 0.40]
-    opts.ResampleFs {mustBeNumeric, mustBeScalarOrEmpty, mustBePositive} = 4
-end
+% Inputs are parsed with pf2_base.args rather than an arguments block so
+% the function also runs under GNU Octave. Spec rows are {name, default,
+% size, class, validators}.
+signal = pf2_base.args.check(signal, '', '', {@mustBeNumeric, @mustBeNonempty}, 'Invalid argument at position 1.');
+fs = pf2_base.args.check(fs, '', '', {@mustBeNumeric, @mustBeScalarOrEmpty, @mustBePositive}, 'Invalid argument at position 2.');
+opts = pf2_base.args.parse('hrvSeries', varargin, {}, {
+    'Window',     (60), '', '', {@mustBeNumeric, @mustBeScalarOrEmpty, @mustBePositive}
+    'Step',       ([]), '', '', {@mustBeNumeric, @mustBeScalarOrEmpty, @mustBePositive}
+    'Overlap',    ([]), '', '', {@mustBeNumeric, @mustBeScalarOrEmpty}
+    'Metric',     ('all'), '', '', {}
+    'MinBeats',   ([]), '', '', {@mustBeNumeric, @mustBeScalarOrEmpty}
+    'Band',       ([0.5 5]), '', '', {@mustBeNumeric}
+    'LFBand',     ([0.04 0.15]), '', '', {@mustBeNumeric}
+    'HFBand',     ([0.15 0.40]), '', '', {@mustBeNumeric}
+    'ResampleFs', (4), '', '', {@mustBeNumeric, @mustBeScalarOrEmpty, @mustBePositive}
+    });
 
 winLen   = opts.Window;
 if isempty(opts.MinBeats)

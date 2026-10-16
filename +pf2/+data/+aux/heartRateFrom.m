@@ -1,4 +1,4 @@
-function [hr, info] = heartRateFrom(x, fs, opts)
+function [hr, info] = heartRateFrom(x, fs, varargin)
 % HEARTRATEFROM Derive a heart-rate (bpm) series from a PPG or EKG waveform
 %
 % Detects cardiac beats in a pulsatile waveform (photoplethysmography or
@@ -47,13 +47,16 @@ function [hr, info] = heartRateFrom(x, fs, opts)
 %
 % See also: pf2_base.auxSignalType, pf2.data.auxOnGrid, pf2.data.aux.edaDecompose
 
-arguments
-    x {mustBeNumeric}
-    fs {mustBeNumeric, mustBeScalarOrEmpty, mustBePositive}
-    opts.Band {mustBeNumeric} = [0.5 5]
-    opts.MinBPM {mustBeNumeric, mustBeScalarOrEmpty, mustBePositive} = 30
-    opts.MaxBPM {mustBeNumeric, mustBeScalarOrEmpty, mustBePositive} = 220
-end
+% Inputs are parsed with pf2_base.args rather than an arguments block so
+% the function also runs under GNU Octave. Spec rows are {name, default,
+% size, class, validators}.
+x = pf2_base.args.check(x, '', '', {@mustBeNumeric}, 'Invalid argument at position 1.');
+fs = pf2_base.args.check(fs, '', '', {@mustBeNumeric, @mustBeScalarOrEmpty, @mustBePositive}, 'Invalid argument at position 2.');
+opts = pf2_base.args.parse('heartRateFrom', varargin, {}, {
+    'Band',   ([0.5 5]), '', '', {@mustBeNumeric}
+    'MinBPM', (30), '', '', {@mustBeNumeric, @mustBeScalarOrEmpty, @mustBePositive}
+    'MaxBPM', (220), '', '', {@mustBeNumeric, @mustBeScalarOrEmpty, @mustBePositive}
+    });
 band = opts.Band;
 maxBPM = opts.MaxBPM;
 

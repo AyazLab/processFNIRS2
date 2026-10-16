@@ -1,4 +1,4 @@
-function [feat, info] = accelFeatures(x, fs, opts)
+function [feat, info] = accelFeatures(x, fs, varargin)
 % ACCELFEATURES Derive motion features from a multi-axis accelerometer signal
 %
 % Computes summary motion features from accelerometer/IMU axes: the vector
@@ -36,11 +36,14 @@ function [feat, info] = accelFeatures(x, fs, opts)
 %
 % See also: pf2_base.auxSignalType, pf2.data.auxOnGrid
 
-arguments
-    x {mustBeNumeric}
-    fs {mustBeNumeric, mustBeScalarOrEmpty, mustBePositive}
-    opts.RemoveGravity (1,1) logical = true
-end
+% Inputs are parsed with pf2_base.args rather than an arguments block so
+% the function also runs under GNU Octave. Spec rows are {name, default,
+% size, class, validators}.
+x = pf2_base.args.check(x, '', '', {@mustBeNumeric}, 'Invalid argument at position 1.');
+fs = pf2_base.args.check(fs, '', '', {@mustBeNumeric, @mustBeScalarOrEmpty, @mustBePositive}, 'Invalid argument at position 2.');
+opts = pf2_base.args.parse('accelFeatures', varargin, {}, {
+    'RemoveGravity', (true), '1,1', 'logical', {}
+    });
 removeGravity = opts.RemoveGravity;
 
 if isrow(x)

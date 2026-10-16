@@ -1,4 +1,4 @@
-function out = labelMarkers(data, map, opts)
+function out = labelMarkers(data, varargin)
 % LABELMARKERS Attach categorical labels to marker codes
 %
 % Adds (or updates) a categorical column on the marker table that maps each
@@ -64,13 +64,16 @@ function out = labelMarkers(data, map, opts)
 %
 % See also: pf2.data.defineBlocks, pf2.data.getMarkers, pf2_base.normalizeMarkers
 
-arguments
-    data
-    map               = []
-    opts.VarName      {mustBeTextScalar} = 'Label'
-    opts.Ordinal      (1,1) logical = false
-    opts.Categories   = []
-end
+% Inputs are parsed with pf2_base.args rather than an arguments block so
+% the function also runs under GNU Octave. Spec rows are {name, default,
+% size, class, validators}.
+[map, opts] = pf2_base.args.parse('labelMarkers', varargin, {
+    'map', ([]), '', '', {}
+    }, {
+    'VarName',    ('Label'), '', '', {@mustBeTextScalar}
+    'Ordinal',    (false), '1,1', 'logical', {}
+    'Categories', ([]), '', '', {}
+    });
 
 % --- Cell array input: apply to each element ---
 if iscell(data)

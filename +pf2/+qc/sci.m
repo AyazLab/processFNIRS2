@@ -1,4 +1,4 @@
-function result = sci(data, opts)
+function result = sci(data, varargin)
 % SCI Scalp Coupling Index for fNIRS channel quality assessment
 %
 % Measures optode-scalp contact quality by cross-correlating cardiac
@@ -76,14 +76,17 @@ function result = sci(data, opts)
 %
 % See also: pf2.qc.powerSpectrum, pf2.qc.plotQuality, bpf
 
-arguments
-    data struct
-    opts.CardiacBand {mustBeNumeric} = [0.5, 2.5]
-    opts.FilterOrder (1,1) {mustBeNumeric, mustBePositive} = 4
-    opts.Wavelengths {mustBeNumeric} = []
-    opts.ChannelNumbers {mustBeNumeric} = []
-    opts.Threshold (1,1) {mustBeNumeric} = 0.75
-end
+% Inputs are parsed with pf2_base.args rather than an arguments block so
+% the function also runs under GNU Octave. Spec rows are {name, default,
+% size, class, validators}.
+data = pf2_base.args.check(data, '', 'struct', {}, 'Invalid argument at position 1.');
+opts = pf2_base.args.parse('sci', varargin, {}, {
+    'CardiacBand',    ([0.5, 2.5]), '', '', {@mustBeNumeric}
+    'FilterOrder',    (4), '1,1', '', {@mustBeNumeric, @mustBePositive}
+    'Wavelengths',    ([]), '', '', {@mustBeNumeric}
+    'ChannelNumbers', ([]), '', '', {@mustBeNumeric}
+    'Threshold',      (0.75), '1,1', '', {@mustBeNumeric}
+    });
 
 %% Validate required fields
 assert(isfield(data, 'raw'), 'pf2:qc:sci:noRaw', ...

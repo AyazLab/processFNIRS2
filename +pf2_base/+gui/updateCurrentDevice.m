@@ -50,9 +50,9 @@ if mergedProbe
         curOptTable = curProbe.TableOpt;
         curSDTable = curProbe.TableSD;
 
-        curChTable.ProbeInd(:) = i;
-        curOptTable.ProbeInd(:) = i;
-        curSDTable.ProbeInd(:) = i;
+        curChTable.ProbeInd = repmat(i, height(curChTable), 1);
+        curOptTable.ProbeInd = repmat(i, height(curOptTable), 1);
+        curSDTable.ProbeInd = repmat(i, height(curSDTable), 1);
 
         if i == 1
             curCh = curChTable;

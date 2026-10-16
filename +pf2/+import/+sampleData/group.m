@@ -52,7 +52,7 @@ parse(p, varargin{:});
 opts = p.Results;
 
 % Aligned block segments (4 subjects x 6 blocks), ready for Experiment
-allData = pf2.import.sampleData.experiment('aligned');
+allData = pf2.import.sampleData('experiment', 'aligned');  % by-name form also works under Octave
 
 % Build and prepare the Experiment
 ex = exploreFNIRS.core.Experiment(allData);

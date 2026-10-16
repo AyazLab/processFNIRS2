@@ -1,4 +1,4 @@
-function out = removeMarkers(data, codes, opts)
+function out = removeMarkers(data, varargin)
 % REMOVEMARKERS Remove marker rows by code, time window, or row index
 %
 % Drops rows from the event marker table selected by marker Code, by a time
@@ -65,13 +65,16 @@ function out = removeMarkers(data, codes, opts)
 % See also: pf2.data.dedupeMarkers, pf2.data.getMarkers, ...
 %           pf2.data.defineBlocks, pf2_base.normalizeMarkers
 
-arguments
-    data
-    codes         {mustBeNumeric} = []
-    opts.Time     {mustBeNumeric} = []
-    opts.Indices  = []
-    opts.Verbose  (1,1) logical = true
-end
+% Inputs are parsed with pf2_base.args rather than an arguments block so
+% the function also runs under GNU Octave. Spec rows are {name, default,
+% size, class, validators}.
+[codes, opts] = pf2_base.args.parse('removeMarkers', varargin, {
+    'codes', ([]), '', '', {@mustBeNumeric}
+    }, {
+    'Time',    ([]), '', '', {@mustBeNumeric}
+    'Indices', ([]), '', '', {}
+    'Verbose', (true), '1,1', 'logical', {}
+    });
 
 % --- Cell array input: apply to each element ---
 if iscell(data)

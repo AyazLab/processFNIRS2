@@ -68,43 +68,46 @@ classdef PipelineFunction
 %
 % See also: pf2_base.pf2_unpackMethod, pf2_base.fnirs.processStageRaw2OD
 
-    properties (SetAccess = immutable)
-        funcName          char
-        funcHandle        function_handle
-        name              char
-        description       char
-        validStages       double
-        requiresOD        logical
-        style             char
-        role              char  % '' | 'intensity2od' | 'motion' | 'filter' | 'rejection' | 'roi' | 'transform'
+    % Untyped declarations with type-matched defaults: inline property types
+    % do not parse under GNU Octave. The constructor assigns inputs that
+    % could arrive as another type with an explicit cast.
+    properties (SetAccess = private)
+        funcName          = ''
+        funcHandle        = @(varargin) []
+        name              = ''
+        description       = ''
+        validStages       = []
+        requiresOD        = logical([])
+        style             = ''
+        role              = ''  % '' | 'intensity2od' | 'motion' | 'filter' | 'rejection' | 'roi' | 'transform'
 
         % Precomputed argument mapping
-        argNames          cell
-        argDefaults       cell
-        specialMask       logical
-        specialTypes      uint8
-        customIndices     double
-        customNames       cell
+        argNames          = {}
+        argDefaults       = {}
+        specialMask       = logical([])
+        specialTypes      = zeros(0, 0, 'uint8')
+        customIndices     = []
+        customNames       = {}
 
         % Per-argument metadata (parallel to argNames; missing entries empty)
         % Used by validators and the methods editor to render type-aware widgets.
-        argTypes          cell  % {'double'|'int'|'logical'|'string'|'enum'|'special'|''}
-        argChoices        cell  % {cell of valid values | []}  for enum types
-        argRanges         cell  % {[min,max] | []}             for numeric types
-        argUnits          cell  % {char | ''}
-        argDescriptions   cell  % {char | ''}
+        argTypes          = {}  % {'double'|'int'|'logical'|'string'|'enum'|'special'|''}
+        argChoices        = {}  % {cell of valid values | []}  for enum types
+        argRanges         = {}  % {[min,max] | []}             for numeric types
+        argUnits          = {}  % {char | ''}
+        argDescriptions   = {}  % {char | ''}
 
         % Precomputed output mapping
-        outputNames       cell
-        xOutIdx           double
-        maskOutIdx        double
-        timeMaskOutIdx    double
-        structOutIdx      double
-        roiOutIdx         double
-        nOutputs          double
+        outputNames       = {}
+        xOutIdx           = []
+        maskOutIdx        = []
+        timeMaskOutIdx    = []
+        structOutIdx      = []
+        roiOutIdx         = []
+        nOutputs          = []
 
         % Convenience flags
-        isIntensity2OD    logical
+        isIntensity2OD    = logical([])
     end
 
     % Special argument type enum constants
@@ -177,11 +180,11 @@ classdef PipelineFunction
 
             obj.funcName = char(funcName);
             obj.funcHandle = str2func(obj.funcName);
-            obj.name = p.Results.Name;
-            obj.description = p.Results.Description;
-            obj.validStages = p.Results.ValidStages;
-            obj.requiresOD = p.Results.RequiresOD;
-            obj.style = p.Results.Style;
+            obj.name = char(p.Results.Name);
+            obj.description = char(p.Results.Description);
+            obj.validStages = double(p.Results.ValidStages);
+            obj.requiresOD = logical(p.Results.RequiresOD);
+            obj.style = char(p.Results.Style);
             obj.role = lower(char(p.Results.Role));
             % Derive isIntensity2OD from role first; fall back to name match
             % so legacy registrations without an explicit role keep working.

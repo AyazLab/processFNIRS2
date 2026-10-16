@@ -268,7 +268,7 @@ if(isstruct(data)) %treat as fNIR struct
     end
     
     
-    dataFields=fields(data);  % copy bio marker fields
+    dataFields=fieldnames(data);  % copy bio marker fields
     for i=1:length(dataFields)
         curField=dataFields{i};
        for j=1:length(validBioFields)
@@ -1032,7 +1032,7 @@ varargout={};
 [validFields]=pf2_base.pf2_getFNIRSfields();
 
 if(nargout>0)
-    fdataFields=fields(PF2.GUIPF2.data);
+    fdataFields=fieldnames(PF2.GUIPF2.data);
        for i=1:length(fdataFields)
            memberIdx=ismember(validFields,fdataFields{i});
            if(any(memberIdx))
@@ -1042,7 +1042,7 @@ if(nargout>0)
     
    if(isfield(PF2,'GUIPF2')&&isfield(PF2.GUIPF2,'data')&&isfield(PF2.GUIPF2.data,'stage')&&(size(PF2.GUIPF2.data.stage,2)==5))
        if(outputData.ProcessOxy&&~isempty(PF2.GUIPF2.data.stage{5}))
-            stage5fields=fields(PF2.GUIPF2.data.stage{5});
+            stage5fields=fieldnames(PF2.GUIPF2.data.stage{5});
             for i=1:length(stage5fields)
                 outfNIR.(stage5fields{i})=PF2.GUIPF2.data.stage{5}.(stage5fields{i});
             end
