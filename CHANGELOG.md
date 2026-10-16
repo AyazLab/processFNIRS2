@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## v1.2.1 (2026-10-16)
 Groundwork for running headless single-subject processing under GNU Octave.
 
 ### Added

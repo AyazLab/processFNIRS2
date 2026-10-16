@@ -17,7 +17,7 @@ DOI is [10.5281/zenodo.23348859](https://doi.org/10.5281/zenodo.23348859).
 
 ## APA
 
-> Curtin, A., & Ayaz, H. (2026). *processFNIRS2* (Version v1.2.0) [Computer
+> Curtin, A., & Ayaz, H. (2026). *processFNIRS2* (Version v1.2.1) [Computer
 > software]. Zenodo. https://doi.org/10.5281/zenodo.23348858
 
 ## BibTeX
@@ -26,7 +26,7 @@ DOI is [10.5281/zenodo.23348859](https://doi.org/10.5281/zenodo.23348859).
 @software{curtin2026processfnirs2,
   author    = {Curtin, Adrian and Ayaz, Hasan},
   title     = {processFNIRS2},
-  version   = {v1.2.0},
+  version   = {v1.2.1},
   publisher = {Zenodo},
   year      = {2026},
   doi       = {10.5281/zenodo.23348858},
