@@ -28,7 +28,7 @@ Groundwork for running headless single-subject processing under GNU Octave.
 - `pf2_base.tests.integration.FullPipelineTest/testDifferentMethods` builds its method combinations with the Pipeline API and runs them through a `ProcessingContext`, so it no longer skips on machines without the named methods in their library or changes the global method selection.
 - `pf2_base.normalizeMarkerDict` parses `{code, label}` cell dictionaries element by element, so numeric codes keep one row each under Octave.
 - `pf2_base.external.zp2sos` orders complex roots with `sortrows` instead of `sort(..., 'ComparisonMethod', 'real')`, which Octave lacks; the resulting second-order sections are identical.
-- `pf2.data.resample` and `pf2.data.split` pass aux time-column names to `table` as a cell array, which Octave requires.
+- `pf2.data.split` and `pf2.data.resample` failed on aux signals stored as tables with their own time column (for example a derived HRV series): MATLAB R2025b's `table` rejects a single char name for `'VariableNames'`. The time-column name is now passed as a cell array. v1.1.0 is affected the same way.
 - `pf2.import.importHitachiMES` no longer requests the unused second output of `strsplit`, and `pf2.data.split` assigns its time-size variables directly; both failed under Octave.
 - `loadDeviceCfg` and `pf2_base.gui.updateCurrentDevice` assign whole table columns instead of growing them by indexed assignment, and no longer call `sprintf` on a categorical or `nansum` on a logical.
 - `bvoxy` declares its positional `coefs` and `isOD` options before its name-value parameters. Argument handling under MATLAB is unchanged.
