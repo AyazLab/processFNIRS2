@@ -245,7 +245,9 @@ classdef BlockDefinitionTest < matlab.unittest.TestCase
         function testEmptyMarkers(testCase)
             % No matching markers returns empty struct array
             data = pf2_base.tests.unit.BlockDefinitionTest.makeSyntheticData();
-            blocks = pf2.data.defineBlocks(data, 'MarkerCode', 999, 'Duration', 10, 'Embed', false);
+            blocks = testCase.verifyWarning(@() pf2.data.defineBlocks(data, ...
+                'MarkerCode', 999, 'Duration', 10, 'Embed', false), ...
+                'pf2:defineBlocks:codesNotFound');
 
             testCase.verifyEmpty(blocks, 'Should return empty for no matching markers');
             testCase.verifyTrue(isstruct(blocks), 'Empty result should still be struct');
@@ -255,9 +257,71 @@ classdef BlockDefinitionTest < matlab.unittest.TestCase
             % Data with empty markers returns empty
             data = pf2_base.tests.unit.BlockDefinitionTest.makeSyntheticData();
             data.markers = pf2_base.normalizeMarkers([]);
-            blocks = pf2.data.defineBlocks(data, 'MarkerCode', 49, 'Duration', 10, 'Embed', false);
+            blocks = testCase.verifyWarning(@() pf2.data.defineBlocks(data, ...
+                'MarkerCode', 49, 'Duration', 10, 'Embed', false), ...
+                'pf2:defineBlocks:noMarkers');
 
             testCase.verifyEmpty(blocks);
+        end
+
+        function testCodesNotFoundNamesPresentCodes(testCase)
+            % The warning lists the codes that are present and the recording
+            data = pf2_base.tests.unit.BlockDefinitionTest.makeSyntheticData();
+            lastwarn('', '');
+            w = warning('off', 'pf2:defineBlocks:codesNotFound');
+            restore = onCleanup(@() warning(w));
+            pf2.data.defineBlocks(data, 'MarkerCode', [7 8], 'Duration', 10, 'Embed', false);
+            [msg, wid] = lastwarn();
+            testCase.verifyEqual(wid, 'pf2:defineBlocks:codesNotFound');
+            testCase.verifySubstring(msg, '7, 8');
+            testCase.verifySubstring(msg, 'Codes present: 49');
+            testCase.verifySubstring(msg, 'for S01');
+        end
+
+        function testMalformedMarkerColumnsHint(testCase)
+            % Marker columns given as [code, time] put times in the Code
+            % column; the warning points at the column order.
+            data = pf2_base.tests.unit.BlockDefinitionTest.makeSyntheticData();
+            data.markers = pf2_base.normalizeMarkers([49 30.5; 49 90.25; 49 180.75]);
+            lastwarn('', '');
+            w = warning('off', 'pf2:defineBlocks:codesNotFound');
+            restore = onCleanup(@() warning(w));
+            blocks = pf2.data.defineBlocks(data, 'MarkerCode', 49, 'Duration', 10, 'Embed', false);
+            [msg, wid] = lastwarn();
+            testCase.verifyEmpty(blocks);
+            testCase.verifyEqual(wid, 'pf2:defineBlocks:codesNotFound');
+            testCase.verifySubstring(msg, 'out of order');
+        end
+
+        function testNoPairedBlocksWarning(testCase)
+            % Start codes present but no end code after them
+            data = pf2_base.tests.unit.BlockDefinitionTest.makeSyntheticData();
+            % End code 2 occurs only before every start code 1.
+            data.markers = pf2_base.normalizeMarkers([5 2; 10 1; 30 1]);
+            blocks = testCase.verifyWarning(@() pf2.data.defineBlocks(data, ...
+                'StartMarker', 1, 'EndMarker', 2, 'Embed', false), ...
+                'pf2:defineBlocks:noPairedBlocks');
+            testCase.verifyEmpty(blocks);
+        end
+
+        function testAllBlocksFilteredWarning(testCase)
+            % Every block shorter than MinDuration
+            data = pf2_base.tests.unit.BlockDefinitionTest.makeSyntheticData();
+            blocks = testCase.verifyWarning(@() pf2.data.defineBlocks(data, ...
+                'MarkerCode', 49, 'MinDuration', 100, 'Embed', false), ...
+                'pf2:defineBlocks:allBlocksFiltered');
+            testCase.verifyEmpty(blocks);
+        end
+
+        function testMatchingCodesDoNotWarn(testCase)
+            % A normal call raises none of the zero-block warnings
+            data = pf2_base.tests.unit.BlockDefinitionTest.makeSyntheticData();
+            lastwarn('', '');
+            blocks = pf2.data.defineBlocks(data, 'MarkerCode', [49 7], 'Duration', 10, 'Embed', false);
+            [~, wid] = lastwarn();
+            testCase.verifyNumElements(blocks, 3);
+            testCase.verifyFalse(startsWith(wid, 'pf2:defineBlocks:'), ...
+                sprintf('Unexpected warning %s', wid));
         end
     end
 
