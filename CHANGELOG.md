@@ -1,5 +1,26 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- `pf2.import.importNIRX` accepts `'Model'` (for example `'NIRSport2'`) to name the device when the `.hdr` only records a serial `Device ID`, as Aurora writes it.
+
+### Changed
+
+- `pf2.export.asSNIRF` writes `MeasurementDate` and `MeasurementTime` in UTC (`+00:00`) when the recording's time zone is known, with the zone in `MeasurementTimeZone`. MNE drops the UTC offset when it reads `MeasurementTime`, so a local time with an offset was read as UTC.
+- `pf2.import.importNIR` no longer stores the marker file index in `Amplitude`. When markers come from more than one `.mrk` file, a `MarkerSource` column holds the file each came from; with one file there is no extra column and `Amplitude` keeps its default of 1, which SNIRF export does not write. The marker documentation now describes the `.mrk` columns as they are read.
+
+### Fixes
+
+- `pf2.import.importNIRX` uses the vendor coordinate set from `<root>_probeInfo.mat` when present, the source of the positions in NIRx's own SNIRF: 3D positions in mm, the vendor 2D layout, 10-10 optode labels, and the head model as the coordinate system (ICBM152 is declared as MNI). Landmarks (Nz, Iz, LPA, RPA, Cz) are read from `digpts.txt`. The `.nirs` `SD` positions it used before are in a translated frame.
+- `pf2.import.importNIRX` imports NIRStar recordings that have no `.nirs` file. It errored on an undefined variable and built no device. Channels now come from the `.hdr` `S-D-Key` and `S-D-Mask`, data from the `.wl1`/`.wl2` files, geometry from `<root>_probeInfo.mat`, and markers from the `.hdr` `Events` or, when there are none, the `.evt` trigger bits. `.hdr` `Events` rows no longer read the frame number as the duration. A `_probeInfo.mat` that lists more optodes than the recording uses is accepted, and a recording without markers gets an empty marker table.
+- `pf2.import.importNIRX` sets `t0` from the first frame of the raw `.roh` stream, read from inside `<root>.zip` without extracting it, when present; this is the start time NIRx's own SNIRF reports. It reads the Aurora `Sampling rate` header key.
+- `pf2.export.asSNIRF` writes source and detector labels and landmarks (`landmarkPos3D` with a label index and a 1-D `landmarkLabels`), and declares the device coordinate system: BIDS identifiers as they are, other tags as `Other` with a description, plus a `CoordinateSystem` metadata tag that `importSNIRF` restores.
+- `pf2.import.importSNIRF` converts `UnixTime` to the recording's `MeasurementTimeZone` instead of attaching the zone to the UTC clock time, which shifted `t0` by the zone's offset. A `MeasurementTime` with a UTC offset is parsed, and a time without a zone stays zone-less instead of taking this machine's zone.
+- `pf2.import.importSNIRF` reads landmark labels stored as fixed-width strings, as NIRx writes them; such files failed to import.
+- `pf2_base.tests.integration.RoundtripTest` export checks pass a time zone, since exporting without one now warns.
+
 ## v1.2.1 (2026-10-16)
 Groundwork for running headless single-subject processing under GNU Octave.
 

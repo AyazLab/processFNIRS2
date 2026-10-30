@@ -51,12 +51,17 @@ function [fNIR] = importNIR(nir_filename, mrk_filename, channelCheck, varargin)
 %   - Baseline data is included as continuous recording (t < 0)
 %   - Channel check results are cached in {filename}_pf2mask.mat
 %   - Requires device configuration to be loaded (pf2.settings.selectDevice)
-%   - Marker columns from .mrk files: the third column is read as Duration.
-%     COBI Studio writes a running counter there rather than an event
-%     duration, so durations from COBI .mrk files are not event lengths
-%     (pf2.export.asNIR writes real durations in that column). Markers from
-%     manual marker files get Duration 100. Amplitude holds the index of the
-%     .mrk file the marker came from (1 = <name>.mrk, 2 = <name>_C.mrk, ...).
+%   - Markers are read from <name>.mrk, <name>_C.mrk, <name>_Mark1.mrk and
+%     <name>_Mark2.mrk when present. In automatic marker files the columns
+%     are Time, Code, Duration, then any further columns (a fourth column is
+%     Amplitude). COBI Studio writes a non-decreasing integer in the third
+%     column, not an event length, so Duration from COBI files is not a
+%     duration; pf2.export.asNIR writes real durations there. Manual marker
+%     files (time stamps against the start code) get Duration 100, and
+%     Amplitude is 1 unless the file has a fourth column.
+%   - When markers come from more than one .mrk file, a MarkerSource column
+%     holds the file each marker came from (1 = <name>.mrk, 2 = <name>_C.mrk,
+%     3 = <name>_Mark1.mrk, 4 = <name>_Mark2.mrk).
 %   - t0 is the header Start Time as local wall-clock time with no time zone;
 %     pass 'TimeZone' to pf2.export.asSNIRF to write absolute times.
 %
@@ -280,19 +285,34 @@ end
 
 if(iscell(mrk_filename))
 	
-    tempData=[];
+    % Normalize each marker file on its own (manual and automatic files have
+    % different column counts), then merge. The index of the file a marker
+    % came from is kept as MarkerSource only when more than one file
+    % contributed markers.
+    markerTbl=[];
+    nSources=0;
     for i=1:length(mrk_filename)
-		markerCell{i}=importMrk(mrk_filename{i},header.startCode,i);
-        if(isfield(markerCell{i},'data'))
-            tempData=[tempData;markerCell{i}.data];
+		markerCell{i}=importMrk(mrk_filename{i},header.startCode);
+        if(isfield(markerCell{i},'data')&&~isempty(markerCell{i}.data))
+            fileTbl=pf2_base.normalizeMarkers(markerCell{i}.data);
+            fileTbl(isnan(fileTbl.Time),:)=[];
+            if(height(fileTbl)==0)
+                continue;
+            end
+            fileTbl.MarkerSource=repmat(i,height(fileTbl),1);
+            nSources=nSources+1;
+            markerTbl=pf2_base.mergeMarkers(markerTbl,fileTbl);
         end
     end
     
     
     markers=markerCell{1};
-    if(~isempty(tempData)) % Merge and sort marker values (.info sections are only preserved for first marker file)
-        [~,idx]=sort(tempData(:,1));
-       markers.data=tempData(idx,:); 
+    if(~isempty(markerTbl)) % Sort merged markers (.info sections are only preserved for first marker file)
+        markerTbl=sortrows(markerTbl,'Time');
+        if(nSources<2)
+            markerTbl.MarkerSource=[];
+        end
+        markers.data=markerTbl;
     end
     
 else
@@ -723,10 +743,7 @@ function cfgName = lookupProbeCfg(modelDigits, probeStyle)
     end
 end
 
-function markers=importMrk(mrk_filename,startCode,mrkSourceID)
-    if(nargin<3)
-        mrkSourceID=0;
-    end
+function markers=importMrk(mrk_filename,startCode)
 	if((ischar(mrk_filename)||isstring(mrk_filename))&&~isempty(mrk_filename))
 		mrkid = fopen(mrk_filename);
 	else
@@ -757,7 +774,7 @@ function markers=importMrk(mrk_filename,startCode,mrkSourceID)
    if(count~=0)  % Then its a manual marker file
 		markers=importManualMrkFile(mrkid,startCode,true);
 	elseif contains(lower(lineF),'marker') % then its an automatic marker file
-		markers=importMrkFile(mrkid,mrkSourceID);
+		markers=importMrkFile(mrkid);
 	else
 	   markers=[];
 	end
@@ -816,18 +833,11 @@ function markers=importManualMrkFile(mrkid,startCode,useStrSplit)
 end
 
 
-function markers=importMrkFile(mrkid,mrkSrcID)
+function markers=importMrkFile(mrkid)
 
-    % Marker format should be
-
-    % t = time from start time/elapsed time
-    % marker value
-    % marker duration
-    % marker source (optional)
-
-    if(nargin<2)
-        mrkSrcID=0;
-    end
+    % Columns are read as time (s), marker code, duration (s), then any
+    % further columns (e.g. amplitude) as written. COBI Studio writes a
+    % non-decreasing integer in the third column, not a duration.
 	frewind(mrkid);
 	for i=1:5
 		   lineF=fgetl(mrkid);
@@ -875,10 +885,6 @@ function markers=importMrkFile(mrkid,mrkSrcID)
        markers.data=[markers.data;mrkLine];
     end
 
-    if(size(markers.data,1)>0)
-        markers.data(:,end+1)=mrkSrcID;
-    end
-    
 	fclose(mrkid);
 end
 

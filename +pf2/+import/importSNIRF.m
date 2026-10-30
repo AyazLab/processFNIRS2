@@ -316,44 +316,57 @@ end
 if isfield(metaDataTags, 'UnixTime')
     unixTime = str2double(metaDataTags.UnixTime);
 
-    % Convert Unix time to datetime
-    fNIR.t0 = datetime(unixTime, 'ConvertFrom', 'posixtime');
+    % Unix time is an absolute (UTC) instant; express it in the recording's
+    % zone when one is recorded, else keep it in UTC
+    fNIR.t0 = datetime(unixTime, 'ConvertFrom', 'posixtime', 'TimeZone', 'UTC');
 
-    if isfield(metaDataTags, 'MeasurementTimeZone')
-        fNIR.t0.TimeZone = metaDataTags.MeasurementTimeZone;
-    else
-        fNIR.t0.TimeZone = 'local';
+    if isfield(metaDataTags, 'MeasurementTimeZone') && ~isempty(metaDataTags.MeasurementTimeZone)
+        try
+            fNIR.t0.TimeZone = metaDataTags.MeasurementTimeZone;
+        catch
+            warning('pf2:importSNIRF:badTimeZone', ...
+                'Unrecognized MeasurementTimeZone ''%s''; t0 is kept in UTC.', ...
+                char(metaDataTags.MeasurementTimeZone));
+        end
     end
 elseif isfield(metaDataTags, 'MeasurementTime') && isfield(metaDataTags, 'MeasurementDate')
-    hasMilliseconds = contains(metaDataTags.MeasurementTime, '.');
-    dateTimeStr = [metaDataTags.MeasurementDate 'T' metaDataTags.MeasurementTime];
-    
-    try
-        if hasMilliseconds
+    % ISO date + time, with an optional UTC offset (Z or +hh:mm). With an
+    % offset the instant is absolute; without one it is the device's
+    % wall-clock time and stays zone-less unless MeasurementTimeZone names
+    % the zone. The zone is never taken from this machine.
+    dateTimeStr = [strtrim(char(metaDataTags.MeasurementDate)) 'T' strtrim(char(metaDataTags.MeasurementTime))];
+    tz = '';
+    if isfield(metaDataTags, 'MeasurementTimeZone') && ~isempty(metaDataTags.MeasurementTimeZone)
+        tz = char(metaDataTags.MeasurementTimeZone);
+    end
+    fmts = {'yyyy-MM-dd''T''HH:mm:ss.SSSSSSXXX', 'yyyy-MM-dd''T''HH:mm:ss.SSSXXX', 'yyyy-MM-dd''T''HH:mm:ssXXX', ...
+            'yyyy-MM-dd''T''HH:mm:ss.SSSSSSxxx', 'yyyy-MM-dd''T''HH:mm:ss.SSSxxx', 'yyyy-MM-dd''T''HH:mm:ssxxx'};
+    for k = 1:numel(fmts)
+        try
+            fNIR.t0 = datetime(dateTimeStr, 'InputFormat', fmts{k}, 'TimeZone', 'UTC');
+            break;
+        catch
+        end
+    end
+    if ~isfield(fNIR, 't0')
+        fmts = {'yyyy-MM-dd''T''HH:mm:ss.SSSSSS', 'yyyy-MM-dd''T''HH:mm:ss.SSS', 'yyyy-MM-dd''T''HH:mm:ss'};
+        for k = 1:numel(fmts)
             try
-                fNIR.t0 = datetime(dateTimeStr, 'InputFormat', 'yyyy-MM-dd''T''HH:mm:ss.SSSz', 'TimeZone', 'GMT');
-                if isfield(metaDataTags, 'MeasurementTimeZone')
-                    fNIR.t0.TimeZone = metaDataTags.MeasurementTimeZone;
-                else
-                    fNIR.t0.TimeZone = 'local';
-                end
+                fNIR.t0 = datetime(dateTimeStr, 'InputFormat', fmts{k});
+                break;
             catch
-                fNIR.t0 = datetime(dateTimeStr, 'InputFormat', 'yyyy-MM-dd''T''HH:mm:ss.SSS', 'TimeZone', 'local');
-            end
-        else
-            try
-                fNIR.t0 = datetime(dateTimeStr, 'InputFormat', 'yyyy-MM-dd''T''HH:mm:ssz', 'TimeZone', 'GMT');
-                if isfield(metaDataTags, 'MeasurementTimeZone')
-                    fNIR.t0.TimeZone = metaDataTags.MeasurementTimeZone;
-                else
-                    fNIR.t0.TimeZone = 'local';
-                end
-            catch
-                fNIR.t0 = datetime(dateTimeStr, 'InputFormat', 'yyyy-MM-dd''T''HH:mm:ss', 'TimeZone', 'local');
             end
         end
-    catch
+    end
+    if ~isfield(fNIR, 't0')
         warning('Failed to parse date/time information');
+    elseif ~isempty(tz)
+        try
+            fNIR.t0.TimeZone = tz;   % converts a zoned t0; labels a zone-less one
+        catch
+            warning('pf2:importSNIRF:badTimeZone', ...
+                'Unrecognized MeasurementTimeZone ''%s''; ignored.', tz);
+        end
     end
 end
 
@@ -740,6 +753,12 @@ landmarks = [];
 if isfield(probeInfo, 'coordinateSystem')
     coordSys = probeInfo.coordinateSystem;
 end
+% pf2 writes a non-BIDS device tag (e.g. 'MNI') as probe 'Other' plus a
+% CoordinateSystem metadata tag; restore the device tag
+if strcmpi(strtrim(char(string(coordSys))), 'Other') && isfield(metaDataTags, 'CoordinateSystem') ...
+        && ~isempty(metaDataTags.CoordinateSystem)
+    coordSys = char(metaDataTags.CoordinateSystem);
+end
 
 if isempty(coordSys)
     % Try to read from BIDS sidecar (coordsystem.json)
@@ -763,9 +782,21 @@ if isfield(probeInfo, 'landmarkPos3D') && isfield(probeInfo, 'landmarkLabels')
     landmarkPos = probeInfo.landmarkPos3D;
     landmarkLabels = probeInfo.landmarkLabels;
 
-    % Create landmarks table
+    % Create landmarks table. Labels may load as a char matrix (fixed-width
+    % strings, as NIRx writes them), a string array or a cellstr.
     nLandmarks = size(landmarkPos, 1);
-    if nLandmarks == length(landmarkLabels)
+    if ischar(landmarkLabels)
+        if size(landmarkLabels, 1) ~= nLandmarks && size(landmarkLabels, 2) == nLandmarks
+            landmarkLabels = landmarkLabels';
+        end
+        landmarkLabels = cellstr(landmarkLabels);
+    elseif isstring(landmarkLabels)
+        landmarkLabels = cellstr(landmarkLabels);
+    end
+    if iscell(landmarkLabels)
+        landmarkLabels = strtrim(landmarkLabels(:));
+    end
+    if nLandmarks == numel(landmarkLabels)
         landmarks = table();
         landmarks.Label = landmarkLabels(:);
         landmarks.X = landmarkPos(:, 1);

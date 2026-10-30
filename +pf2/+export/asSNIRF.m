@@ -43,8 +43,9 @@ function [snirfData] = asSNIRF(fNIRcells, filepath, varargin)
 %   'TimeZone'  - Time zone of the recording's wall-clock start time (t0),
 %                 e.g. 'America/New_York' or '-05:00' (default: ''). Applied
 %                 when t0 has no zone of its own; never taken from this
-%                 machine. With a zone, MeasurementTime carries its UTC offset
-%                 and UnixTime/AcquisitionStartTime are written. Without one,
+%                 machine. With a zone, MeasurementDate/MeasurementTime are
+%                 written in UTC (offset +00:00), MeasurementTimeZone keeps
+%                 the zone, and UnixTime/AcquisitionStartTime are written. Without one,
 %                 MeasurementTime has no offset, UnixTime is omitted and
 %                 'pf2:asSNIRF:noTimeZone' is warned.
 %
@@ -633,7 +634,13 @@ function metaData = info2meta(nirStruct, timeZone)
                      'without a UTC offset and UnixTime is omitted. Pass ''TimeZone'' ' ...
                      '(e.g. ''America/New_York'') to write absolute times.']);
             else
-                metaData.MeasurementTime = c2v(char(datetime(t0, 'Format', 'HH:mm:ss.SSSxxx')));
+                % Date and time are written in UTC (+00:00): some readers
+                % (MNE) drop the offset and would misplace a local time.
+                % MeasurementTimeZone keeps the recording's zone.
+                t0utc = t0;
+                t0utc.TimeZone = 'UTC';
+                metaData.MeasurementDate = c2v(char(datetime(t0utc, 'Format', 'yyyy-MM-dd')));
+                metaData.MeasurementTime = c2v(char(datetime(t0utc, 'Format', 'HH:mm:ss.SSSxxx')));
                 metaData.MeasurementTimeZone = c2v(t0.TimeZone);
                 tStart = 0;
                 if isfield(nirStruct, 'time') && ~isempty(nirStruct.time)
@@ -976,28 +983,75 @@ function [probe, measurementList, deviceMetaDataTags, rawMax, strippedChannelsMa
         probe.sourcePos3D   = table2array(probeStruct.SrcPos(:, {'x', 'y', 'z'}));
     end
 
-    % Include landmark positions if available
-    if isfield(probeStruct, 'landmarkPos3D')
-        probe.landmarkPos3D = probeStruct.landmarkPos3D;
+    % Landmarks: [x y z index] rows with a 1-D landmarkLabels string array
+    if isfield(probeStruct, 'landmarkPos3D') && ~isempty(probeStruct.landmarkPos3D)
+        lmPos = probeStruct.landmarkPos3D(:, 1:3);
+        probe.landmarkPos3D = [lmPos, (1:size(lmPos, 1))'];
+        if isfield(probeStruct, 'landmarkLabels') && numel(probeStruct.landmarkLabels) == size(lmPos, 1)
+            probe.landmarkLabels = string(probeStruct.landmarkLabels(:))';
+        end
     end
-    if isfield(probeStruct, 'landmarkLabels')
-        probe.landmarkLabels = probeStruct.landmarkLabels;
+
+    % Source and detector labels, when there is one per written position
+    srcLabels = posLabels(probeStruct, 'SrcPos');
+    if ~isempty(srcLabels) && numel(srcLabels) == size(probe.sourcePos3D, 1)
+        probe.sourceLabels = srcLabels;
     end
-    
-    % Add source and detector labels if available
-    if isfield(probeStruct, 'SrcPos') && isfield(probeStruct.SrcPos, 'Label')
-        probe.sourceLabels = probeStruct.SrcPos.Label;
+    detLabels = posLabels(probeStruct, 'DetPos');
+    if ~isempty(detLabels) && numel(detLabels) == size(probe.detectorPos3D, 1)
+        probe.detectorLabels = detLabels;
     end
-    if isfield(probeStruct, 'DetPos') && isfield(probeStruct.DetPos, 'Label')
-        probe.detectorLabels = probeStruct.DetPos.Label;
+
+    % Coordinate system: BIDS identifiers pass through; any other device tag
+    % (e.g. 'MNI') is written as 'Other' with a description, and the tag
+    % itself goes to metaDataTags.CoordinateSystem for importSNIRF
+    sysName = '';
+    sysDesc = '';
+    if isfield(deviceInfoFields, 'CoordinateSystem') && ~isempty(deviceInfoFields.CoordinateSystem)
+        sysName = char(deviceInfoFields.CoordinateSystem);
     end
-    
-    % Add coordinate system info
-    probe.coordinateSystem = c2v('Other');
-    probe.coordinateSystemDescription = c2v('Probe-specific coordinate system');
+    if isfield(deviceInfoFields, 'CoordinateSystemDescription') && ~isempty(deviceInfoFields.CoordinateSystemDescription)
+        sysDesc = char(deviceInfoFields.CoordinateSystemDescription);
+    end
+    bidsIds = {'MNI152NLin2009cAsym', 'MNI152NLin6Asym', 'fsaverage', 'CapTrak'};
+    isBids = strcmpi(sysName, bidsIds);
+    if any(isBids)
+        probe.coordinateSystem = c2v(bidsIds{isBids});
+        if ~isempty(sysDesc)
+            probe.coordinateSystemDescription = c2v(sysDesc);
+        end
+    else
+        probe.coordinateSystem = c2v('Other');
+        if isempty(sysName) || any(strcmpi(sysName, {'Other', 'Unknown'}))
+            if isempty(sysDesc)
+                sysDesc = 'Probe-specific coordinate system';
+            end
+        else
+            if isempty(sysDesc)
+                sysDesc = sprintf('Device coordinate system: %s', sysName);
+            else
+                sysDesc = sprintf('%s: %s', sysName, sysDesc);
+            end
+            deviceMetaDataTags.CoordinateSystem = c2v(sysName);
+        end
+        probe.coordinateSystemDescription = c2v(sysDesc);
+    end
      
     % Add wavelengths
     probe.wavelengths = wvList(~isnan(wvList));
+end
+
+
+function labels = posLabels(probeStruct, field)
+    % POSLABELS Optode labels from a SrcPos/DetPos table as a string row; [] if none
+    labels = [];
+    if isfield(probeStruct, field) && istable(probeStruct.(field)) ...
+            && ismember('Label', probeStruct.(field).Properties.VariableNames)
+        labels = string(probeStruct.(field).Label(:))';
+        if any(ismissing(labels) | strlength(labels) == 0)
+            labels = [];
+        end
+    end
 end
 
 
