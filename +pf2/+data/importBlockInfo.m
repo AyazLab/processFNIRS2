@@ -1,4 +1,4 @@
-function blocks = importBlockInfo(blocks, source, opts)
+function blocks = importBlockInfo(blocks, source, varargin)
 % IMPORTBLOCKINFO Import block-level metadata into block structs
 %
 % Attaches per-block metadata to a block struct array (from defineBlocks).
@@ -90,17 +90,18 @@ function blocks = importBlockInfo(blocks, source, opts)
 %
 % See also: pf2.data.importInfo, pf2.data.defineBlocks, pf2.data.extractBlocks
 
-arguments
-    blocks
-    source
-    opts.Field = ''
-    opts.Keys = {}
-    opts.MarkerCode {mustBeNumeric} = []
-    opts.Condition = ''
-    opts.Sheet = 1
-    opts.Overwrite (1,1) logical = true
-    opts.ReadOptions {mustBeA(opts.ReadOptions, 'cell')} = {}
-end
+% Inputs are parsed with pf2_base.args rather than an arguments block so
+% the function also runs under GNU Octave. Spec rows are {name, default,
+% size, class, validators}.
+opts = pf2_base.args.parse('importBlockInfo', varargin, {}, {
+    'Field',       (''), '', '', {}
+    'Keys',        ({}), '', '', {}
+    'MarkerCode',  ([]), '', '', {@mustBeNumeric}
+    'Condition',   (''), '', '', {}
+    'Sheet',       (1), '', '', {}
+    'Overwrite',   (true), '1,1', 'logical', {}
+    'ReadOptions', ({}), '', '', {@(v) mustBeA(v, 'cell')}
+    });
 
 keys = cellstr(opts.Keys);
 if numel(keys) == 1 && isempty(keys{1})

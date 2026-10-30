@@ -1,4 +1,4 @@
-function events = blocksToEvents(blocks, opts)
+function events = blocksToEvents(blocks, varargin)
 % BLOCKSTOEVENTS Convert block definitions to GLM event structs
 %
 % Groups blocks by condition and collects onset times, durations, and
@@ -41,10 +41,13 @@ function events = blocksToEvents(blocks, opts)
 % See also: pf2.data.defineBlocks, pf2_base.fnirs.buildDesignMatrix,
 %           pf2_base.fnirs.fitGLM
 
-arguments
-    blocks {mustBeA(blocks, 'struct')}
-    opts.GroupBy = 'Condition'
-end
+% Inputs are parsed with pf2_base.args rather than an arguments block so
+% the function also runs under GNU Octave. Spec rows are {name, default,
+% size, class, validators}.
+blocks = pf2_base.args.check(blocks, '', '', {@(v) mustBeA(v, 'struct')}, 'Invalid argument at position 1.');
+opts = pf2_base.args.parse('blocksToEvents', varargin, {}, {
+    'GroupBy', ('Condition'), '', '', {}
+    });
 
 groupField = char(opts.GroupBy);
 

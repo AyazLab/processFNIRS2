@@ -1,4 +1,4 @@
-function [bandPower, info] = eegBandPower(x, fs, opts)
+function [bandPower, info] = eegBandPower(x, fs, varargin)
 % EEGBANDPOWER Extract canonical EEG band-power feature series
 %
 % Converts a raw EEG waveform (one or more channels) into per-band power
@@ -46,12 +46,15 @@ function [bandPower, info] = eegBandPower(x, fs, opts)
 %
 % See also: pf2_base.auxSignalType, pf2.data.auxOnGrid
 
-arguments
-    x {mustBeNumeric}
-    fs {mustBeNumeric, mustBeScalarOrEmpty, mustBePositive}
-    opts.Bands = []
-    opts.SmoothWin {mustBeNumeric, mustBeScalarOrEmpty, mustBePositive} = 1
-end
+% Inputs are parsed with pf2_base.args rather than an arguments block so
+% the function also runs under GNU Octave. Spec rows are {name, default,
+% size, class, validators}.
+x = pf2_base.args.check(x, '', '', {@mustBeNumeric}, 'Invalid argument at position 1.');
+fs = pf2_base.args.check(fs, '', '', {@mustBeNumeric, @mustBeScalarOrEmpty, @mustBePositive}, 'Invalid argument at position 2.');
+opts = pf2_base.args.parse('eegBandPower', varargin, {}, {
+    'Bands',     ([]), '', '', {}
+    'SmoothWin', (1), '', '', {@mustBeNumeric, @mustBeScalarOrEmpty, @mustBePositive}
+    });
 bands = opts.Bands;
 smoothWin = opts.SmoothWin;
 

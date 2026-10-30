@@ -31,13 +31,37 @@ classdef Pipeline
 % See also: pf2_base.RawPipeline, pf2_base.OxyPipeline,
 %           pf2_base.PipelineFunction
 
+    % Types are enforced by set methods rather than inline declarations,
+    % which do not parse under GNU Octave.
     properties (SetAccess = protected)
-        name          char   = ''
-        description   char   = ''
-        steps         cell   = {}
+        name          = ''   % char
+        description   = ''   % char
+        steps         = {}   % cell of pf2_base.PipelineFunction
     end
 
     methods
+        function obj = set.name(obj, v)
+            obj.name = pf2_base.Pipeline.asChar(v);
+        end
+
+        function obj = set.description(obj, v)
+            obj.description = pf2_base.Pipeline.asChar(v);
+        end
+
+        function obj = set.steps(obj, v)
+            % As a 'cell' declaration: an empty numeric, char or logical
+            % array becomes an empty cell of the same size.
+            if ~iscell(v)
+                if isempty(v) && (isnumeric(v) || ischar(v) || islogical(v))
+                    v = cell(size(v));
+                else
+                    error('MATLAB:validation:UnableToConvert', ...
+                        'steps must be a cell array.');
+                end
+            end
+            obj.steps = v;
+        end
+
         function obj = Pipeline(name, varargin)
         % Constructor.
         %
@@ -515,6 +539,18 @@ classdef Pipeline
             else
                 error('pf2:Pipeline:badIndexType', ...
                     'Step identifier must be numeric index or function name string.');
+            end
+        end
+    end
+
+    methods (Static, Access = private)
+        function v = asChar(v)
+            % Convert with char(), as a 'char' property declaration does.
+            try
+                v = char(v);
+            catch
+                error('MATLAB:validation:UnableToConvert', ...
+                    'Value must be convertible to char.');
             end
         end
     end

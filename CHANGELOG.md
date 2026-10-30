@@ -1,5 +1,45 @@
 # Changelog
 
+## v1.2.1 (2026-10-16)
+Groundwork for running headless single-subject processing under GNU Octave.
+
+### Added
+
+- GNU Octave CI (`.github/workflows/octave.yml`) runs `pf2_base.tests.runOctaveSubset` in the `gnuoctave/octave:11.3.0` image on every push and pull request. It covers package loading, the INI reader/writer, every shipped device, import, default processing, the Pipeline API through a `ProcessingContext`, the block-averaging recipe (markers, blocks, epochs, averages, sliding windows) and the QC pipeline, and compares numerical results with a MATLAB reference (`+pf2_base/+tests/+data/octave_reference.mat`, rebuilt with `pf2_base.tests.generateOctaveReference`). The job removes the root `pf2.m` GUI launcher from its checkout, since under Octave it shadows the `+pf2` package.
+- `pf2.import.sampleData(name, ...)` loads a named sample dataset (`'fNIR2000'`, `'experiment'`, `'group'`, ...), equivalent to `pf2.import.sampleData.<name>(...)`. Under Octave this is the form that works, since there `sampleData.m` hides the `+sampleData` namespace.
+- `pf2_base.args.parse` and `pf2_base.args.check` reproduce arguments-block input handling (optional positional inputs, name-value matching, class conversion, size checks, validators and their error identifiers) in a form Octave can run.
+- `pf2_base.env.ensureOctaveCompat` loads the Octave `datatypes`, `signal` and `statistics` packages and adds `compat_shims/octave` (`contains`, `strip`, `strlength`, `extractAfter`, `extractBefore`, `isStringScalar`, two-argument `round`). It runs automatically at the importer, device-loading and initialization entry points and does nothing under MATLAB.
+- `pf2_base.env.runtime` now reports missing `datatypes` and `statistics` packages as well as `signal`.
+
+### Changed
+
+- `pf2.data.defineBlocks` warns instead of silently returning no blocks when the markers are empty (`pf2:defineBlocks:noMarkers`), when none of the requested marker or end-marker codes occur (`pf2:defineBlocks:codesNotFound`, which lists the codes present and flags non-integer codes as a likely column-order problem), when start codes have no following end code (`pf2:defineBlocks:noPairedBlocks`), and when every block falls outside `MinDuration`/`MaxDuration` (`pf2:defineBlocks:allBlocksFiltered`). Messages name the recording when `info.filename` or `info.SubjectID` is set.
+- `pf2_base.external.INI` no longer derives from `dynamicprops`. Sections are held in a private struct and reached through overloaded indexing, so `cfg.<Section>`, `cfg.("Section")`, `get`, `add`, `remove`, `read` and `write` behave as before, including on object arrays and indexed elements. Display lists each section. A section whose name matches a property or method of the class (for example `write` or `Data`) is stored under an `x_` prefix and still reached by its original name through `get`, `remove` and `write`; the old class refused such names.
+- `pf2.methods.raw.create` and `pf2.methods.oxy.create` reject method names that match a property or method of `INI`, since method libraries address methods as `cfg.(name)`.
+- INI objects saved by earlier versions keep their sections: MATLAB re-attaches the old dynamic properties after loading, and the first access moves them into the new store. Any section still missing is re-read from `File`, with a warning if it cannot be restored. Under Octave, saving and loading classdef objects keeps only their declared properties, so INI section data does not survive a save there.
+- `pf2_base.fnirs.processStageOD2Hb` parses its name-value options with `inputParser` instead of an `arguments` block.
+- The functions in `pf2.data` (including `pf2.data.aux`) and `pf2.qc` parse their inputs with `pf2_base.args` instead of `arguments` blocks, whose name-value entries Octave cannot parse. Inputs are handled as before: a comparison of the original and new parsing over several thousand input combinations (defaults, positional prefixes, name variants, wrong types, unknown and ambiguous names, unpaired lists) found no difference in values, classes or error identifiers.
+- Exported group tables (`Experiment.toWideTable`, `toLongTable`, `writeCSV`, and the default labels of `exploreFNIRS.export.mergeGbyTablesWide`/`mergeGbyTablesLong`) name channels with zero-padded numbers from the new `pf2_base.channelLabels` (`HbO_Opt01`, `Opt01_HbO`). With 10 or more channels these were space-padded (`HbO_Opt 1`); columns now sort in channel order and contain no spaces. LME model labels are unchanged. The wide export's default labels no longer fail when no names are passed.
+- `pf2_base.ProcessingContext`, `pf2_base.Pipeline` and `pf2_base.PipelineFunction` declare properties without inline types or validators, which Octave cannot parse. Set methods on `ProcessingContext` and `Pipeline` convert, size-check and validate in the same order as the declarations, with the same MATLAB error identifiers. Under MATLAB, ordinary values (char, string scalars, numeric, logical, structs and empty arrays) convert and error as before. Exceptions: objects such as `datetime`, `categorical` or `table` assigned to a struct-valued `ProcessingContext` property now error instead of being converted with `struct()`; complex values with a zero imaginary part are accepted as real instead of failing `mustBeReal`; and `matlab.lang.OnOffSwitchState` values assigned to logical properties are stored as `logical`. Under Octave, `mustBeMember` and `mustBePositive` raise errors without an identifier.
+- `ProcessingContext` derives from `handle` and implements `copy()` itself instead of inheriting `matlab.mixin.Copyable`. `copy()` still returns an independent shallow copy of the same class and size, including `pf2.ProcessingContext` and `pf2_base.GUIContext`, without reloading the method libraries. Subclass constructors receive `ProcessingContext.COPY_TOKEN` from `copy()` and must accept it.
+
+### Fixes
+
+- `pf2_base.tests.unit.AllPlotsSmokeTest/testCreateFigure` pins light mode, as `PlotStyleTest` does, so a dark default figure color left by earlier rendering tests no longer fails it.
+- `pf2_base.tests.integration.FullPipelineTest/testDifferentMethods` builds its method combinations with the Pipeline API and runs them through a `ProcessingContext`, so it no longer skips on machines without the named methods in their library or changes the global method selection.
+- `pf2_base.normalizeMarkerDict` parses `{code, label}` cell dictionaries element by element, so numeric codes keep one row each under Octave.
+- `pf2_base.external.zp2sos` orders complex roots with `sortrows` instead of `sort(..., 'ComparisonMethod', 'real')`, which Octave lacks; the resulting second-order sections are identical.
+- `pf2.data.split` and `pf2.data.resample` failed on aux signals stored as tables with their own time column (for example a derived HRV series): MATLAB R2025b's `table` rejects a single char name for `'VariableNames'`. The time-column name is now passed as a cell array. v1.1.0 is affected the same way.
+- `pf2_base.wavelet.wcoherence` returns NaN when either input has no finite samples or is constant. With cached CWTs (`'CwtX'`/`'CwtY'`) the coefficients of a series containing NaN are NaN, and the clamp `min(wcoh, 1)` turned them into a coherence of exactly 1, because `min` ignores NaN; computed internally, an all-NaN series was zero-filled and gave 0. The clamp now leaves NaN in place. Hyperscanning analyses that cache per-channel CWTs and include a fully rejected channel or ROI were inflated toward 1 for every pair involving it. `WaveletCoherenceTest` covers both paths.
+- `pf2.import.importHitachiMES` no longer requests the unused second output of `strsplit`, and `pf2.data.split` assigns its time-size variables directly; both failed under Octave.
+- `loadDeviceCfg` and `pf2_base.gui.updateCurrentDevice` assign whole table columns instead of growing them by indexed assignment, and no longer call `sprintf` on a categorical or `nansum` on a logical.
+- `bvoxy` declares its positional `coefs` and `isOD` options before its name-value parameters. Argument handling under MATLAB is unchanged.
+- Calls to the undocumented `fields` alias use `fieldnames`.
+- `pf2.Device` and `pf2_base.PipelineFunction` properties use `SetAccess = private` instead of `immutable`, which Octave does not support. They remain read-only outside the class.
+- `processFNIRS2`'s local device helper is renamed so Octave resolves the call to `pf2_base.gui.updateCurrentDevice` instead of recursing into the local function.
+- `pf2_initialize` adds the toolbox subfolders by absolute path. Octave stored the relative entries verbatim, so they stopped resolving after the working folder changed.
+- Removed a stray editor temporary file (`+pf2_base/+external/.!36603!INI.m`).
+
 ## v1.2.0 (2026-10-09)
 processFNIRS2 moves to the AyazLab organization.
 

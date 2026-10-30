@@ -27,6 +27,10 @@ function ensureStatsFallbacks()
 %
 %   See also: pf2_base.pf2_initialize, pf2_base.hasStatsToolbox
 
+% Under GNU Octave, load the required packages and MATLAB-function shims
+% first (no-op under MATLAB).
+pf2_base.env.ensureOctaveCompat();
+
 % When the toolbox is installed its own nan* functions are on the path and
 % take precedence; nothing to add.
 if pf2_base.hasStatsToolbox()
@@ -35,7 +39,8 @@ end
 
 root    = pf2_base.pf2_defaultRootPath();
 shimDir = fullfile(root, 'compat_shims');
-if exist(shimDir, 'dir') == 7 && ~contains([pathsep path pathsep], [pathsep shimDir pathsep])
+% strfind rather than contains: this runs before the Octave shims exist.
+if exist(shimDir, 'dir') == 7 && isempty(strfind([pathsep path pathsep], [pathsep shimDir pathsep]))
     addpath(shimDir, '-end');
 end
 

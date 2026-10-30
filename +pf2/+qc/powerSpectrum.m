@@ -1,4 +1,4 @@
-function result = powerSpectrum(data, opts)
+function result = powerSpectrum(data, varargin)
 % POWERSPECTRUM Power spectral density with physiological peak detection
 %
 % Computes power spectral density per channel using Welch's method and
@@ -84,15 +84,18 @@ function result = powerSpectrum(data, opts)
 %
 % See also: pf2.qc.sci, pf2.qc.plotQuality, pwelch
 
-arguments
-    data struct
-    opts.Signal = 'auto'
-    opts.Channels {mustBeNumeric} = []
-    opts.WindowLength (1,1) {mustBeNumeric, mustBePositive} = 10
-    opts.Overlap (1,1) {mustBeNumeric} = 0.5
-    opts.FreqRange {mustBeNumeric} = [0, 5]
-    opts.DetectPeaks (1,1) logical = true
-end
+% Inputs are parsed with pf2_base.args rather than an arguments block so
+% the function also runs under GNU Octave. Spec rows are {name, default,
+% size, class, validators}.
+data = pf2_base.args.check(data, '', 'struct', {}, 'Invalid argument at position 1.');
+opts = pf2_base.args.parse('powerSpectrum', varargin, {}, {
+    'Signal',       ('auto'), '', '', {}
+    'Channels',     ([]), '', '', {@mustBeNumeric}
+    'WindowLength', (10), '1,1', '', {@mustBeNumeric, @mustBePositive}
+    'Overlap',      (0.5), '1,1', '', {@mustBeNumeric}
+    'FreqRange',    ([0, 5]), '', '', {@mustBeNumeric}
+    'DetectPeaks',  (true), '1,1', 'logical', {}
+    });
 
 %% Validate and resolve signal
 assert(isfield(data, 'fs'), 'pf2:qc:powerSpectrum:noFs', ...

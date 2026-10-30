@@ -17,7 +17,8 @@ function mergedTables=mergeGbyTablesWide(gbyTables,bioMarkers,channels,times,exp
 %   times        - Time points to include (default: [] = all)
 %   exportAux    - Include auxiliary data (default: false)
 %   exportROI    - Include ROI-averaged data (default: false)
-%   optodeNames  - Cell array of optode/channel names (default: numbers)
+%   optodeNames  - Cell array of optode/channel names (default: zero-padded
+%                  numbers from pf2_base.channelLabels)
 %
 % Outputs:
 %   mergedTables - Combined table in wide format with columns:
@@ -53,7 +54,7 @@ if(nargin<3)
 end
 
 if(nargin<7)
-    optodeNames=num2str(channels);
+    optodeNames=pf2_base.channelLabels(channels);
 else
     optodeNames=cellstr(optodeNames);
 end
@@ -106,7 +107,7 @@ for g=1:length(gbyTables)
     if(emptyChannelFlag&&exportFNIR)
         numCh=size(curBarGA.HbO.data,2);
         channels=1:numCh;
-        optodeNames=cellstr(num2str(channels(:)));
+        optodeNames=pf2_base.channelLabels(channels);
     elseif(exportFNIR)
        numCh=length(channels); 
     else
@@ -185,7 +186,7 @@ for g=1:length(gbyTables)
      if(exportAux&&isfield(curBarGA,'Aux'))
          %warning('To-do add AUX fields to export wide'); % trouble is syncing up timing between each
          
-         curAuxFields=fields(curBarGA.Aux);
+         curAuxFields=fieldnames(curBarGA.Aux);
          for aux=1:length(curAuxFields)
             curAuxName=curAuxFields{aux};
             curAux= curBarGA.Aux.(curAuxName);

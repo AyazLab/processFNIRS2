@@ -62,7 +62,7 @@ function fNIR=loadExistingMaskOrCheck(fNIR,nirFilename,channelCheckVersion)
         if exist(filestr, 'file') == 2
 			chMaskFile=load(filestr);
 
-            maskFields=fields(chMaskFile);
+            maskFields=fieldnames(chMaskFile);
 
             potentiallyValidMasks=find(contains(lower(maskFields),'mask'));
             % Just accept anything that says mask

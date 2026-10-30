@@ -27,7 +27,7 @@ if(isempty(ProgressHandles))
         ProgressHandles.h=struct();
     return;
 else
-   validFields=fields(ProgressHandles.h);
+   validFields=fieldnames(ProgressHandles.h);
    
    for i=1:length(validFields)
         if(isvalid(ProgressHandles.h.(validFields{i})))

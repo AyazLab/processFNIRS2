@@ -1,4 +1,4 @@
-function data = infoFromTable(data, T, value, opts)
+function data = infoFromTable(data, T, varargin)
 % INFOFROMTABLE Write table columns back into .info fields of fNIRS structs
 %
 % Maps table rows positionally to fNIRS data structs: row 1 updates
@@ -55,13 +55,15 @@ function data = infoFromTable(data, T, value, opts)
 %
 % See also: pf2.data.infoToTable, pf2.data.importInfo
 
-arguments
-    data
-    T
-    value = "__pf2_infoFromTable_novalue__"
-    opts.Overwrite (1,1) logical = true
-    opts.Clear (1,1) logical = false
-end
+% Inputs are parsed with pf2_base.args rather than an arguments block so
+% the function also runs under GNU Octave. Spec rows are {name, default,
+% size, class, validators}.
+[value, opts] = pf2_base.args.parse('infoFromTable', varargin, {
+    'value', ("__pf2_infoFromTable_novalue__"), '', '', {}
+    }, {
+    'Overwrite', (true), '1,1', 'logical', {}
+    'Clear',     (false), '1,1', 'logical', {}
+    });
 
 % A sentinel default marks "value was not supplied" (single-field mode
 % requires an explicit value argument, matching the original ~isempty(varargin)

@@ -8,8 +8,8 @@ abstract: >-
   statistics.
 type: software
 doi: 10.5281/zenodo.23348858
-version: 1.2.0
-date-released: "2026-10-09"
+version: 1.2.1
+date-released: "2026-10-16"
 license: GPL-3.0-or-later
 repository-code: "https://github.com/AyazLab/processFNIRS2"
 url: "https://github.com/AyazLab/processFNIRS2"

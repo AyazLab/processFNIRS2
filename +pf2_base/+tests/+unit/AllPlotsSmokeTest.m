@@ -283,6 +283,13 @@ classdef AllPlotsSmokeTest < matlab.unittest.TestCase
     methods (Test)
 
         function testCreateFigure(testCase)
+            % The white background is the light-theme result. Rendering
+            % tests earlier in the suite (and exportgraphics) can leave
+            % groot's defaultFigureColor dark, which PlotStyle reads as dark
+            % mode, so pin light mode here as PlotStyleTest does.
+            prevForceLight = pf2_base.plot.PlotStyle.getForceLightMode();
+            pf2_base.plot.PlotStyle.setForceLightMode(true);
+            restoreTheme = onCleanup(@() pf2_base.plot.PlotStyle.setForceLightMode(prevForceLight)); %#ok<NASGU>
             fig = pf2_base.plot.createFigure('Visible', 'off');
             testCase.verifyTrue(ishandle(fig));
             testCase.verifyEqual(get(fig, 'Color'), [1 1 1]);

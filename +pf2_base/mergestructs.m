@@ -65,7 +65,7 @@ if(~isstruct(inputStruct1))
     structOut=inputStruct2;
 end
 
-structFields2=fields(inputStruct2);
+structFields2=fieldnames(inputStruct2);
 
 numFields = length(structFields2);
 

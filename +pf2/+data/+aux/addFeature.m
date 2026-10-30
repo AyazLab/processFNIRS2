@@ -1,4 +1,4 @@
-function data = addFeature(data, name, values, opts)
+function data = addFeature(data, name, values, varargin)
 % ADDFEATURE Store a derived signal as a typed auxiliary feature
 %
 % Writes a derived feature (e.g. an HR series from heartRateFrom, RVT from
@@ -38,14 +38,17 @@ function data = addFeature(data, name, values, opts)
 % See also: pf2_base.normalizeAux, pf2.data.aux.heartRateFrom,
 %           pf2.data.aux.respFeatures, pf2.export.asSNIRF
 
-arguments
-    data {mustBeA(data, 'struct')}
-    name {mustBeText}
-    values {mustBeNumeric}
-    opts.Time {mustBeNumeric} = []
-    opts.Unit = ''
-    opts.VarNames = {}
-end
+% Inputs are parsed with pf2_base.args rather than an arguments block so
+% the function also runs under GNU Octave. Spec rows are {name, default,
+% size, class, validators}.
+data = pf2_base.args.check(data, '', '', {@(v) mustBeA(v, 'struct')}, 'Invalid argument at position 1.');
+name = pf2_base.args.check(name, '', '', {@mustBeText}, 'Invalid argument at position 2.');
+values = pf2_base.args.check(values, '', '', {@mustBeNumeric}, 'Invalid argument at position 3.');
+opts = pf2_base.args.parse('addFeature', varargin, {}, {
+    'Time',     ([]), '', '', {@mustBeNumeric}
+    'Unit',     (''), '', '', {}
+    'VarNames', ({}), '', '', {}
+    });
 name = matlab.lang.makeValidName(char(string(name)));
 
 t = opts.Time;

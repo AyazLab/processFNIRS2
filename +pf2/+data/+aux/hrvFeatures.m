@@ -1,4 +1,4 @@
-function [hrv, info] = hrvFeatures(x, fs, opts)
+function [hrv, info] = hrvFeatures(x, varargin)
 % HRVFEATURES Heart-rate variability metrics from a waveform or beat series
 %
 % Computes standard time- and frequency-domain HRV metrics, which serve as
@@ -55,16 +55,20 @@ function [hrv, info] = hrvFeatures(x, fs, opts)
 %
 % See also: pf2.data.aux.heartRateFrom, pf2_base.auxSignalType
 
-arguments
-    x {mustBeNumeric}
-    fs {mustBeNumeric} = []
-    opts.Input = 'waveform'
-    opts.IBIUnit = 'ms'
-    opts.Band {mustBeNumeric} = [0.5 5]
-    opts.LFBand {mustBeNumeric} = [0.04 0.15]
-    opts.HFBand {mustBeNumeric} = [0.15 0.40]
-    opts.ResampleFs {mustBeNumeric, mustBeScalarOrEmpty, mustBePositive} = 4
-end
+% Inputs are parsed with pf2_base.args rather than an arguments block so
+% the function also runs under GNU Octave. Spec rows are {name, default,
+% size, class, validators}.
+x = pf2_base.args.check(x, '', '', {@mustBeNumeric}, 'Invalid argument at position 1.');
+[fs, opts] = pf2_base.args.parse('hrvFeatures', varargin, {
+    'fs', ([]), '', '', {@mustBeNumeric}
+    }, {
+    'Input',      ('waveform'), '', '', {}
+    'IBIUnit',    ('ms'), '', '', {}
+    'Band',       ([0.5 5]), '', '', {@mustBeNumeric}
+    'LFBand',     ([0.04 0.15]), '', '', {@mustBeNumeric}
+    'HFBand',     ([0.15 0.40]), '', '', {@mustBeNumeric}
+    'ResampleFs', (4), '', '', {@mustBeNumeric, @mustBeScalarOrEmpty, @mustBePositive}
+    });
 inputType = lower(char(opts.Input));
 ibiUnit = lower(char(opts.IBIUnit));
 lfBand = opts.LFBand;

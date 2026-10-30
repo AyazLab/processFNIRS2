@@ -365,5 +365,20 @@ classdef SplitTest < matlab.unittest.TestCase
             testCase.verifyEqual(seg.HbO, expectedHbO, 'AbsTol', 1e-15, ...
                 'Extracted HbO should exactly match original data slice');
         end
+
+        function testAuxTableWithTimeColumn(testCase)
+            % An aux signal stored as a table with its own time column
+            % (e.g. a derived HRV series). Splitting and resampling rebuild
+            % its time table, which R2025b's table() rejected when given a
+            % single char variable name.
+            data = testCase.processedData;
+            t = (data.time(1):1:data.time(end))';
+            data.Aux.hrv = table(t, 60 + randn(numel(t), 1), ...
+                'VariableNames', {'time', 'RMSSD'});
+            seg = pf2.data.split(data, data.time(1) + 20, data.time(1) + 80);
+            testCase.verifyTrue(isfield(seg, 'Aux'), 'split dropped the Aux field');
+            rs = pf2.data.resample(data, 0.5);
+            testCase.verifyTrue(isfield(rs, 'Aux'), 'resample dropped the Aux field');
+        end
     end
 end

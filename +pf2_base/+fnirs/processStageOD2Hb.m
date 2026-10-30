@@ -1,4 +1,4 @@
-function outData = processStageOD2Hb(data, time, subjectAge, DirtyBaseline, curProbe, baseline, dpfMode, dpfFixed, defaultAge, options)
+function outData = processStageOD2Hb(data, time, subjectAge, DirtyBaseline, curProbe, baseline, dpfMode, dpfFixed, defaultAge, varargin)
 % PROCESSSTAGEOD2HB Convert optical density to hemoglobin concentrations
 %
 % Beer-Lambert conversion stage of the fNIRS processing pipeline.
@@ -60,20 +60,15 @@ function outData = processStageOD2Hb(data, time, subjectAge, DirtyBaseline, curP
 %
 % See also: pf2_base.fnirs.processStageRaw2OD, pf2_base.fnirs.processStageFilterHb, pf2_base.fnirs.bvoxy
 
-arguments
-    data
-    time
-    subjectAge
-    DirtyBaseline
-    curProbe
-    baseline
-    dpfMode
-    dpfFixed
-    defaultAge
-    options.BaselineSamples = []
-    options.PPF = []
-    options.PVC = []
-end
+% Name-value options. inputParser rather than an arguments block so the
+% function also parses under GNU Octave.
+ip = inputParser;
+ip.FunctionName = 'processStageOD2Hb';
+ip.addParameter('BaselineSamples', []);
+ip.addParameter('PPF', []);
+ip.addParameter('PVC', []);
+ip.parse(varargin{:});
+options = ip.Results;
 
 % Determine DPF settings. Comparisons are case-insensitive (strcmpi) as
 % defense-in-depth: processFNIRS2's validator canonicalizes DPFmode to

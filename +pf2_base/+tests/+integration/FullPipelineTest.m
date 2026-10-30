@@ -26,9 +26,16 @@ classdef FullPipelineTest < matlab.unittest.TestCase
 % See also: processFNIRS2, pf2.import.sampleData, matlab.unittest.TestCase
 
     properties (TestParameter)
-        % Define method combinations for parameterized testing
-        rawMethod = {'None', 'x1_lpf', 'x5_TDDR'};
-        oxyMethod = {'None', 'lpf_car'};
+        % Method combinations, built with the Pipeline API so the test does
+        % not depend on the user's stored method library. Each value lists
+        % pipeline steps as {funcName, paramStruct} pairs; {} means 'None'.
+        rawMethod = struct( ...
+            'None', {{}}, ...
+            'OD_lpf', {{{'pf2_Intensity2OD', struct()}, {'pf2_lpf', struct('freq_cut', 0.1)}}}, ...
+            'OD_TDDR', {{{'pf2_Intensity2OD', struct()}, {'pf2_MotionCorrectTDDR', struct()}}});
+        oxyMethod = struct( ...
+            'None', {{}}, ...
+            'lpf_CAR', {{{'pf2_lpf', struct('freq_cut', 0.1)}, {'pf2_CAR', struct()}}});
     end
 
     properties
@@ -287,38 +294,28 @@ classdef FullPipelineTest < matlab.unittest.TestCase
             testCase.assumeNotEmpty(testCase.fNIR2000Data, ...
                 'fNIR2000 sample data not available');
 
-            % Set the raw processing method
-            try
-                pf2.methods.raw.setMethod(rawMethod);
-            catch ME
-                testCase.assumeFail(sprintf(...
-                    'Could not set raw method %s: %s', rawMethod, ME.message));
+            % Run through an isolated ProcessingContext so the user's global
+            % method selection is neither required nor changed.
+            ctx = pf2.ProcessingContext();
+            if ~isempty(rawMethod)
+                ctx.rawMethod = buildMethod(pf2_base.RawPipeline('TestRaw'), rawMethod);
             end
-
-            % Set the oxy processing method
-            try
-                pf2.methods.oxy.setMethod(oxyMethod);
-            catch ME
-                testCase.assumeFail(sprintf(...
-                    'Could not set oxy method %s: %s', oxyMethod, ME.message));
+            if ~isempty(oxyMethod)
+                ctx.oxyMethod = buildMethod(pf2_base.OxyPipeline('TestOxy'), oxyMethod);
             end
-
-            % Process with the configured methods
-            processed = processFNIRS2(testCase.fNIR2000Data);
+            processed = ctx.process(testCase.fNIR2000Data);
+            label = sprintf('raw=%s, oxy=%s', ctx.rawMethodName, ctx.oxyMethodName);
 
             % Verify output has required fields
             testCase.verifyTrue(isfield(processed, 'HbO'), ...
-                sprintf('Output with raw=%s, oxy=%s should have HbO', ...
-                rawMethod, oxyMethod));
+                sprintf('Output with %s should have HbO', label));
 
             testCase.verifyTrue(isfield(processed, 'HbR'), ...
-                sprintf('Output with raw=%s, oxy=%s should have HbR', ...
-                rawMethod, oxyMethod));
+                sprintf('Output with %s should have HbR', label));
 
             % Verify data is valid (not all NaN)
             testCase.verifyFalse(all(isnan(processed.HbO(:))), ...
-                sprintf('HbO with raw=%s, oxy=%s should not be all NaN', ...
-                rawMethod, oxyMethod));
+                sprintf('HbO with %s should not be all NaN', label));
         end
     end
 
@@ -393,4 +390,16 @@ classdef FullPipelineTest < matlab.unittest.TestCase
                 'Raw data time dimension should be preserved');
         end
     end
+end
+
+function method = buildMethod(pipe, steps)
+% BUILDMETHOD Add {funcName, params} steps to a pipeline and return its method.
+for k = 1:numel(steps)
+    if isempty(fieldnames(steps{k}{2}))
+        pipe = pipe.add(steps{k}{1});
+    else
+        pipe = pipe.add(steps{k}{1}, steps{k}{2});
+    end
+end
+method = pipe.toMethod();
 end

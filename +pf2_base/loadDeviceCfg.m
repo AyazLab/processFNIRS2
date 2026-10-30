@@ -94,6 +94,11 @@ forceLoad = isempty(deviceCfgFilename)>0;
 if ~forceLoad&&~isempty(deviceTable) && any(strcmp(name, deviceTable.Probe)) && loadFromGlobal
     global setF
     setF = deviceTable.ProbeInfo(strcmp(name, deviceTable.Probe));
+    % MATLAB stores the struct column as a struct array; Octave's datatypes
+    % keeps it as a cell column.
+    if iscell(setF)
+        setF = setF{1};
+    end
     probeInfo = setF.device;
     return;
 end
@@ -115,7 +120,7 @@ if(nargout==0) % assigns the global device
     container.device = probeInfo;
     existingDevice = strcmp(deviceTable.Probe,name);
     deviceTable(existingDevice,:)=[];
-    deviceTable = [deviceTable; {name, container}];
+    deviceTable = [deviceTable; cell2table({name, container}, 'VariableNames', {'Probe', 'ProbeInfo'})];
     setF.device=probeInfo;
 end
 
@@ -320,7 +325,7 @@ function p = processChannelInfo(p)
     p.TableCh.ColNumber = (1:length(p.ChannelNumbers))';
     p.TableCh.OptodeNumber = p.ChannelNumbers(:);
     p.TableCh.isTime = p.TableCh.OptodeNumber == 0;
-    if(nansum(p.TableCh.isTime)>1)
+    if(sum(p.TableCh.isTime)>1)
        warning('More than one time column specified, please set only one channel to be # 0. Using first ch 0 column');
        firstIdx=find(p.TableCh.isTime);
        p.TableCh.isTime(firstIdx+1:end)=false;
@@ -484,10 +489,12 @@ function p=calculateSourceDetectorSeparation(p)
         
         %Assign labels
         if(~ismember('Label',p.TableSD.Properties.VariableNames))
+            sdLabels=cell(length(p.TableSD.Index),1);
             for sd=1:length(p.TableSD.Index)
-                typeLabel=sprintf('%s',p.TableSD.Type(sd));
-                p.TableSD.Label{sd}=sprintf('%s%i',typeLabel(1),p.TableSD.Index(sd));
+                typeLabel=char(p.TableSD.Type(sd));
+                sdLabels{sd}=sprintf('%s%i',typeLabel(1),p.TableSD.Index(sd));
             end
+            p.TableSD.Label=sdLabels;
         end
 
         %Assign source/detector idx
@@ -628,13 +635,13 @@ function  p=generateProbeLayout(p,includeSSchannels)
         p.TableSD.proj2D=plane2D_sd(:,zeroCoordIndex);
      end
      
-    for c=1:length(p.ChannelList)
-        chIdxMatch=(find(p.ChannelNumbers==p.ChannelList(c)));
-        p.TableOpt.Ch(c,1:length(chIdxMatch))=chIdxMatch;
-        p.TableOpt.wv(c,1:length(chIdxMatch))=p.Wavelength(chIdxMatch);
-        if(~hasLabel)
-           p.TableOpt.Label{c}=sprintf('Opt%i', p.ChannelList(c));
-        end
+    % Build the per-optode columns whole, then assign; growing a table
+    % variable by indexed assignment is MATLAB-only behavior.
+    [chMap, wvMap, optLabels] = optodeColumnMaps(p);
+    p.TableOpt.Ch = chMap;
+    p.TableOpt.wv = wvMap;
+    if(~hasLabel)
+        p.TableOpt.Label=optLabels;
     end
     
     p.OptPos3D_mean=nanmean(xyz,1);
@@ -664,7 +671,7 @@ function  p=generateProbeLayout(p,includeSSchannels)
 
     % Size the layout off the channel count, not a coordinate column, so a
     % 2D-only device (no Pos3D -> no OptPos.z) still builds a layout.
-    p.OptPos.subplot_layout(:)=cell(p.NumOptodes,1);
+    p.OptPos.subplot_layout=cell(p.NumOptodes,1);
     p.OptPos.subplot_layout(~p.IsShortSeparation)=p.OptLayout2D(:);
     if(includeSSchannels)
         p.OptPos.subplot_layout_ss=p.OptLayout2D_ss(:);
@@ -792,13 +799,11 @@ function p = buildLayoutOnlyProbe(p)
 
     % Per-channel raw-column map + labels (mirrors generateProbeLayout's tail).
     hasLabel = ismember('Label', p.TableOpt.Properties.VariableNames);
-    for c = 1:n
-        chIdxMatch = find(p.ChannelNumbers == p.ChannelList(c));
-        p.TableOpt.Ch(c, 1:length(chIdxMatch)) = chIdxMatch;
-        p.TableOpt.wv(c, 1:length(chIdxMatch)) = p.Wavelength(chIdxMatch);
-        if ~hasLabel
-            p.TableOpt.Label{c} = sprintf('Opt%i', p.ChannelList(c));
-        end
+    [chMap, wvMap, optLabels] = optodeColumnMaps(p);
+    p.TableOpt.Ch = chMap;
+    p.TableOpt.wv = wvMap;
+    if ~hasLabel
+        p.TableOpt.Label = optLabels;
     end
 
     % A PlotStructure grid ([row col channel] rows) becomes a declared layout.
@@ -1012,6 +1017,25 @@ function p = sortOptodes(p)
 
 end
 
+function [chMap, wvMap, labels] = optodeColumnMaps(p)
+% OPTODECOLUMNMAPS Per-optode raw-column indices, wavelengths, and labels
+%
+% Inputs:
+%   p - Probe info struct with ChannelList, ChannelNumbers, Wavelength
+%
+% Outputs:
+%   chMap  - [nOpt x maxWv] raw column index per optode (zero-padded)
+%   wvMap  - [nOpt x maxWv] wavelength per column (zero-padded)
+%   labels - {nOpt x 1} default labels 'Opt<N>'
 
-
-
+    nOpt   = length(p.ChannelList);
+    chMap  = zeros(nOpt, 0);
+    wvMap  = zeros(nOpt, 0);
+    labels = cell(nOpt, 1);
+    for c = 1:nOpt
+        chIdxMatch = find(p.ChannelNumbers == p.ChannelList(c));
+        chMap(c, 1:length(chIdxMatch)) = chIdxMatch;
+        wvMap(c, 1:length(chIdxMatch)) = p.Wavelength(chIdxMatch);
+        labels{c} = sprintf('Opt%i', p.ChannelList(c));
+    end
+end

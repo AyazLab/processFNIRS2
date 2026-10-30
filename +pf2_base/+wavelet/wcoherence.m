@@ -37,7 +37,10 @@ function result = wcoherence(x, y, fs, varargin)
 %
 % Outputs:
 %   result - Struct with fields:
-%     .value     - Mean WCT magnitude in FreqRange (scalar, COI-masked)
+%     .value     - Mean WCT magnitude in FreqRange (scalar, COI-masked).
+%                  NaN when either input has no finite samples or is
+%                  constant, or when the supplied CWT coefficients are NaN;
+%                  coherence is undefined for those inputs.
 %     .pvalue    - NaN (use permutation test for significance)
 %     .method    - 'wcoherence'
 %     .windowed  - false
@@ -97,6 +100,9 @@ function result = wcoherence(x, y, fs, varargin)
     y = y(:);
     T = length(x);
 
+    % Coherence is undefined for a missing or constant input
+    degenerate = isDegenerate(x) || isDegenerate(y);
+
     % NaN handling: linear interpolation
     x = fillNaN(x);
     y = fillNaN(y);
@@ -155,7 +161,13 @@ function result = wcoherence(x, y, fs, varargin)
 
     % --- Wavelet coherence ---
     wcoh = abs(sWxy).^2 ./ (sWxx .* sWyy + eps(class(sWxx)));
-    wcoh = min(wcoh, 1);
+    % Clamp rounding overshoot; min(NaN, 1) would return 1 and turn
+    % NaN coefficients (e.g. a cached CWT of a missing series) into
+    % perfect coherence
+    wcoh(wcoh > 1) = 1;
+    if degenerate
+        wcoh(:) = NaN;
+    end
 
     % --- Build time vector ---
     times = (0:T-1)' / fs;
@@ -248,6 +260,13 @@ function S = smoothCWT(W, scales, fs, smoothFactor)
         end
     end
     S = Sout;
+end
+
+
+function tf = isDegenerate(v)
+% True when v has fewer than two finite samples or no variation
+    f = v(isfinite(v));
+    tf = numel(f) < 2 || max(f) == min(f);
 end
 
 

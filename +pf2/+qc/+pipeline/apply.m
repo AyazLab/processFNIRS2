@@ -1,4 +1,4 @@
-function data = apply(data, report, opts)
+function data = apply(data, report, varargin)
 % APPLY Update fchMask based on a QC pipeline report
 %
 % ANDs the QC check results with the existing fchMask so that previously
@@ -31,13 +31,16 @@ function data = apply(data, report, opts)
 %
 % See also: pf2.qc.pipeline.assess, pf2.qc.pipeline.report
 
-arguments
-    data struct
-    report struct
-    opts.Checks = 'all'
-    opts.Mode = 'and'
-    opts.MarkNoisy (1,1) logical = false
-end
+% Inputs are parsed with pf2_base.args rather than an arguments block so
+% the function also runs under GNU Octave. Spec rows are {name, default,
+% size, class, validators}.
+data = pf2_base.args.check(data, '', 'struct', {}, 'Invalid argument at position 1.');
+report = pf2_base.args.check(report, '', 'struct', {}, 'Invalid argument at position 2.');
+opts = pf2_base.args.parse('apply', varargin, {}, {
+    'Checks',    ('all'), '', '', {}
+    'Mode',      ('and'), '', '', {}
+    'MarkNoisy', (false), '1,1', 'logical', {}
+    });
 
 %% Validate report
 assert(isfield(report, 'pass'), 'pf2:qc:pipeline:badReport', ...

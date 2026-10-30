@@ -1,4 +1,4 @@
-function blocks = defineBlocks(data, markerCodes, duration, opts)
+function blocks = defineBlocks(data, varargin)
 % DEFINEBLOCKS Create block definition struct array from event markers
 %
 % Parses fNIRS markers into a block definition array describing time
@@ -110,6 +110,20 @@ function blocks = defineBlocks(data, markerCodes, duration, opts)
 %   on an un-extracted code does not raise a false alarm; clean flagged codes
 %   with pf2.data.dedupeMarkers.
 %
+%   An empty result is always reported rather than returned silently, each
+%   with its own identifier so batch scripts can turn it off:
+%     pf2:defineBlocks:noMarkers         - data.markers has no rows
+%     pf2:defineBlocks:codesNotFound     - none of the requested marker (or
+%                                          end marker) codes occur; lists the
+%                                          codes present, and notes non-integer
+%                                          codes, which usually mean the marker
+%                                          columns are out of order
+%     pf2:defineBlocks:noPairedBlocks    - start codes occur but no end marker
+%                                          follows them
+%     pf2:defineBlocks:allBlocksFiltered - every block falls outside
+%                                          MinDuration/MaxDuration
+%   Messages name the recording (info.filename or info.SubjectID) when set.
+%
 % Example:
 %   % Simple: marker codes + fixed duration
 %   blocks = pf2.data.defineBlocks(data, [49, 50], 30);
@@ -150,27 +164,30 @@ function blocks = defineBlocks(data, markerCodes, duration, opts)
 % See also: pf2.data.extractBlocks, pf2.data.getMarkers, pf2.data.split, ...
 %           pf2.data.dedupeMarkers, pf2.data.removeMarkers
 
-arguments
-    data
-    markerCodes         {mustBeNumeric} = []
-    duration            {mustBeNumeric, mustBeScalarOrEmpty} = []
-    opts.MarkerCode     {mustBeNumeric} = []
-    opts.Duration       (1,1) {mustBeNumeric, mustBeNonnegative} = 0
-    opts.UseDuration    (1,1) logical = false
-    opts.StartMarker    {mustBeNumeric} = []
-    opts.EndMarker      {mustBeNumeric} = []
-    opts.ConditionMap   = []            % [] = not provided (auto-populate); a cell = provided
-    opts.ConditionField = 'Condition'
-    opts.InfoTable      = []
-    opts.InfoFields     (1,1) struct = struct()
-    opts.MinDuration    (1,1) {mustBeNumeric} = 0
-    opts.MaxDuration    (1,1) {mustBeNumeric} = Inf
-    opts.SortByTime     (1,1) logical = true
-    opts.PrePad         (1,1) {mustBeNumeric, mustBeNonnegative} = 0
-    opts.PostPad        (1,1) {mustBeNumeric, mustBeNonnegative} = 0
-    opts.MarkerWindow   = 'core'
-    opts.Embed          (1,1) logical = true
-end
+% Inputs are parsed with pf2_base.args rather than an arguments block so
+% the function also runs under GNU Octave. Spec rows are {name, default,
+% size, class, validators}.
+[markerCodes, duration, opts] = pf2_base.args.parse('defineBlocks', varargin, {
+    'markerCodes', ([]), '', '', {@mustBeNumeric}
+    'duration',    ([]), '', '', {@mustBeNumeric, @mustBeScalarOrEmpty}
+    }, {
+    'MarkerCode',     ([]), '', '', {@mustBeNumeric}
+    'Duration',       (0), '1,1', '', {@mustBeNumeric, @mustBeNonnegative}
+    'UseDuration',    (false), '1,1', 'logical', {}
+    'StartMarker',    ([]), '', '', {@mustBeNumeric}
+    'EndMarker',      ([]), '', '', {@mustBeNumeric}
+    'ConditionMap',   ([]), '', '', {}
+    'ConditionField', ('Condition'), '', '', {}
+    'InfoTable',      ([]), '', '', {}
+    'InfoFields',     (struct()), '1,1', 'struct', {}
+    'MinDuration',    (0), '1,1', '', {@mustBeNumeric}
+    'MaxDuration',    (Inf), '1,1', '', {@mustBeNumeric}
+    'SortByTime',     (true), '1,1', 'logical', {}
+    'PrePad',         (0), '1,1', '', {@mustBeNumeric, @mustBeNonnegative}
+    'PostPad',        (0), '1,1', '', {@mustBeNumeric, @mustBeNonnegative}
+    'MarkerWindow',   ('core'), '', '', {}
+    'Embed',          (true), '1,1', 'logical', {}
+    });
 
 % --- Cell array input: apply to each element (requires Embed) ---
 if iscell(data)
@@ -280,6 +297,8 @@ if ~isempty(mrk) && size(mrk, 1) > 1
 end
 
 if isempty(mrk) || size(mrk, 1) == 0
+    warning('pf2:defineBlocks:noMarkers', ...
+        'data.markers is empty%s, so no blocks were defined.', recordingLabel(data));
     blocks = struct('startTime', {}, 'endTime', {}, 'duration', {}, ...
         'markerCode', {}, 'markerIndex', {}, 'amplitude', {}, 'info', {});
     if embedBlocks
@@ -287,6 +306,17 @@ if isempty(mrk) || size(mrk, 1) == 0
         blocks = data;
     end
     return;
+end
+
+% Requested codes that match nothing return zero blocks; say so, since a
+% malformed marker array (e.g. columns out of order) otherwise fails silently.
+startCodes = extractCodes;
+if hasMarkerCode && hasEndMarker
+    startCodes = markerCode(:);
+end
+startFound = warnIfCodesMissing(mrk, startCodes, 'marker', data);
+if hasEndMarker
+    warnIfCodesMissing(mrk, endMarker(:), 'end marker', data);
 end
 
 % Build blocks based on mode
@@ -300,6 +330,12 @@ else
 end
 
 if isempty(blocks)
+    if startFound && hasEndMarker
+        warning('pf2:defineBlocks:noPairedBlocks', ...
+            ['Start marker(s) %s occur%s but no end marker %s follows them, ', ...
+             'so no blocks were defined.'], codeList(startCodes), ...
+            recordingLabel(data), codeList(endMarker(:)));
+    end
     if embedBlocks
         data.blocks = blocks;
         blocks = data;
@@ -463,6 +499,12 @@ end
 % Filter by duration
 if minDur > 0 || isfinite(maxDur)
     keep = arrayfun(@(b) b.duration >= minDur && b.duration <= maxDur, blocks);
+    if ~isempty(keep) && ~any(keep)
+        warning('pf2:defineBlocks:allBlocksFiltered', ...
+            ['All %d block(s)%s fall outside MinDuration/MaxDuration ', ...
+             '[%g, %g] s, so none were kept.'], numel(keep), recordingLabel(data), ...
+            minDur, maxDur);
+    end
     blocks = blocks(keep);
     % Re-number after filtering
     for k = 1:length(blocks)
@@ -673,4 +715,88 @@ else
     blocks = blockList;
 end
 
+end
+
+function found = warnIfCodesMissing(mrk, codes, kind, data)
+% WARNIFCODESMISSING Warn when none of the requested codes occur in the markers
+%
+% Inputs:
+%   mrk   - Marker array [M x 4] (Time, Code, Duration, Amplitude)
+%   codes - Requested codes (column vector)
+%   kind  - Word used in the message ('marker' or 'end marker')
+%   data  - fNIRS struct, used to name the recording
+%
+% Outputs:
+%   found - True when at least one requested code occurs
+
+found = true;
+if isempty(codes)
+    return;
+end
+present = unique(mrk(:, 2));
+found = any(ismember(codes, present));
+if found
+    return;
+end
+msg = sprintf('None of the requested %s codes (%s) occur in data.markers%s. Codes present: %s.', ...
+    kind, codeList(codes), recordingLabel(data), codeList(present));
+finitePresent = present(isfinite(present));
+if ~isempty(finitePresent) && any(finitePresent ~= round(finitePresent))
+    msg = [msg ' The codes present are not all integers, which usually means the ' ...
+        'marker columns are out of order: data.markers should be a table with Time, ' ...
+        'Code, Duration and Amplitude columns (see pf2_base.normalizeMarkers).'];
+end
+warning('pf2:defineBlocks:codesNotFound', '%s', msg);
+end
+
+function s = codeList(codes)
+% CODELIST Short text list of codes for messages (first 10 shown)
+%
+% Inputs:
+%   codes - Numeric vector
+%
+% Outputs:
+%   s - e.g. '49, 50' or '1, 2, 3, ... (25 codes)'
+
+codes = codes(:)';
+if isempty(codes)
+    s = 'none';
+    return;
+end
+shown = codes(1:min(10, end));
+s = strjoin(arrayfun(@(c) sprintf('%g', c), shown, 'UniformOutput', false), ', ');
+if numel(codes) > 10
+    s = sprintf('%s, ... (%d codes)', s, numel(codes));
+end
+end
+
+function s = recordingLabel(data)
+% RECORDINGLABEL ' for <name>' from info.filename (file name only) or
+% info.SubjectID, else ''
+%
+% Inputs:
+%   data - fNIRS struct
+%
+% Outputs:
+%   s - Text to splice into messages so batch warnings name the recording
+
+s = '';
+if ~isfield(data, 'info') || ~isstruct(data.info)
+    return;
+end
+for f = {'filename', 'SubjectID'}
+    if isfield(data.info, f{1}) && ~isempty(data.info.(f{1}))
+        v = data.info.(f{1});
+        if isnumeric(v)
+            v = num2str(v);
+        end
+        v = char(string(v));
+        if strcmp(f{1}, 'filename')
+            [~, name, ext] = fileparts(v);
+            v = [name ext];
+        end
+        s = sprintf(' for %s', v);
+        return;
+    end
+end
 end

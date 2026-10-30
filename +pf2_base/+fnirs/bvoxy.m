@@ -208,12 +208,12 @@ addRequired(p,'wavelengths',validDataInput); %wavelengths for each column in dat
 addRequired(p,'distanceSrcDet',validDataInput); %source detector distance for each column in channels (in cm)
 addOptional(p,'baselineSamples',[1:50],validDataInput); %array of samples to get from baseline (in seconds
 addOptional(p,'age',25,validScalarPosNum); %Age to calculate DPF from (in years)
+addOptional(p,'coefs',[],validDataInput); %If empty calculate instead of using mfg coefficients
+addOptional(p,'isOD',false,@islogical); %Indicates that data is in light intensity instead of OD
 addParameter(p,'DiffPathlengthFactor',[],validScalarNum); % Fixed DPF (typical 3-10); overrides the age calculation
 addParameter(p,'PartialVolumeCorrection',[],@(x) isempty(x)||(isnumeric(x)&&isvector(x))); % Partial-volume correction divisor(s) (>=1), scalar or per-optode: L = SD.*DPF./pvc
 addParameter(p,'PartialPathlengthFactor',[],@(x) isempty(x)||(isnumeric(x)&&isvector(x))); % ESCAPE HATCH: a complete effective factor, L = SD.*ppf (no DPF/PVC decomposition)
 addParameter(p,'NoPathlength',false,@islogical); % Force same fixed path length to use (typical is 5.93)
-addOptional(p,'coefs',[],validDataInput); %If empty calculate instead of using mfg coefficients
-addOptional(p,'isOD',false,@islogical); %Indicates that data is in light intensity instead of OD
 %addOptional(p,'dirtyBaseline',false,@islogical); %get first non-NA value to use as baseline if nothing is readily apparent;
 
 parse(p,varargin{:});

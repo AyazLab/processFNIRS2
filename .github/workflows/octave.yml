@@ -1,0 +1,67 @@
+name: octave
+
+# GNU Octave compatibility lane for the headless single-subject path:
+# package loading, INI reader/writer, device loading, import, default
+# processing, and the Pipeline API through a ProcessingContext, with
+# numerical results compared against a MATLAB reference
+# (+pf2_base/+tests/+data/octave_reference.mat).
+#
+# Notes:
+#  - Octave needs no license, so this lane runs on every push and pull request.
+#  - Root pf2.m (the MATLAB GUI launcher) shadows the +pf2 package under
+#    Octave, so it is removed from the CI checkout before the run.
+#  - Regenerate the reference under MATLAB with
+#      pf2_base.tests.generateOctaveReference()
+#    whenever an intended change alters device geometry or processing output.
+#  - Octave packages are installed with -local (the job runs as root, and a
+#    global install would land outside the cached folder) and cached. The
+#    install step installs any package missing after the cache restore, so a
+#    stale or empty cache cannot skip it; bump CACHE_VERSION to force a fresh
+#    cache.
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  OCTAVE_PACKAGES: datatypes control signal statistics
+  CACHE_VERSION: 3
+
+jobs:
+  octave-subset:
+    name: Octave 11.3.0 headless subset
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    container:
+      image: gnuoctave/octave:11.3.0
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Cache Octave packages
+        id: pkg-cache
+        uses: actions/cache@v4
+        with:
+          # Package files and Octave's list of installed packages live in
+          # separate folders; both are needed for pkg to see a restore.
+          path: |
+            ~/.local/share/octave
+            ~/.config/octave
+          key: octave-11.3.0-pkgs-${{ env.CACHE_VERSION }}-${{ env.OCTAVE_PACKAGES }}
+
+      - name: Install missing Octave packages
+        run: |
+          octave-cli --no-gui --eval "need = strsplit(getenv('OCTAVE_PACKAGES')); have = cellfun(@(p) p.name, pkg('list'), 'UniformOutput', false); miss = setdiff(need, have); if isempty(miss), disp('all packages present'); else, printf('installing: %s\n', strjoin(miss, ' ')); pkg('install', '-local', '-forge', miss{:}); end"
+
+      - name: List Octave packages
+        run: octave-cli --no-gui --eval "pkg list"
+
+      - name: Remove GUI launcher that shadows +pf2
+        run: rm -f pf2.m
+
+      - name: Run Octave subset
+        run: |
+          octave-cli --no-gui --eval "addpath(pwd); pf2_base.tests.runOctaveSubset()"
