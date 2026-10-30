@@ -9,6 +9,7 @@
 ### Changed
 
 - `pf2.export.asSNIRF` writes `MeasurementDate` and `MeasurementTime` in UTC (`+00:00`) when the recording's time zone is known, with the zone in `MeasurementTimeZone`. MNE drops the UTC offset when it reads `MeasurementTime`, so a local time with an offset was read as UTC.
+- The "Time column could not be found" warning from device setup in `processFNIRS2` is shown once per session (`pf2:updateCurrentDevice:noTimeColumn`). It is expected for devices whose raw data has no time column, such as NIRx, and was repeated for every recording.
 - `pf2.import.importNIR` no longer stores the marker file index in `Amplitude`. When markers come from more than one `.mrk` file, a `MarkerSource` column holds the file each came from; with one file there is no extra column and `Amplitude` keeps its default of 1, which SNIRF export does not write. The marker documentation now describes the `.mrk` columns as they are read.
 
 ### Fixes

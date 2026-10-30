@@ -68,7 +68,15 @@ if mergedProbe
     timeIndex = find(curCh.isTime);
     if isempty(timeIndex) || device.Info.TimeIsSampleCount
         if ~device.Info.TimeIsSampleCount && isempty(timeIndex)
-            warning('Time column could not be found, assuming each row contains samples only');
+            % Expected for devices whose raw data has no time column (e.g.
+            % NIRx), so it is shown once per session
+            persistent noTimeColumnNoted
+            if isempty(noTimeColumnNoted)
+                noTimeColumnNoted = true;
+                warning('pf2:updateCurrentDevice:noTimeColumn', ...
+                    ['Time column could not be found, assuming each row contains samples only. ', ...
+                     '(This note is shown once per session.)']);
+            end
         end
         if isempty(timeIndex)
             timeIndex = 0;
