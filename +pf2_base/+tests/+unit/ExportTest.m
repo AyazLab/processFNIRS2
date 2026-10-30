@@ -662,15 +662,15 @@ classdef ExportTest < matlab.unittest.TestCase
             mkdir(folder);
             testCase.addTeardown(@() rmdir(folder, 's'));
             fid = fopen(fullfile(folder, 'rec_config.hdr'), 'w');
-            fprintf(fid, ['[GeneralInfo]\nDevice ID=1916_0062_A\n', ...
-                'Date=2024-01-30 14:35:23.376775\nSampling rate=8.138020833333334\n']);
+            fprintf(fid, ['[GeneralInfo]\nDevice ID=ABCD_0001_X\n', ...
+                'Date=2023-05-02 09:15:10.250000\nSampling rate=8.138020833333334\n']);
             fclose(fid);
             t = (0:99)' / 8.138020833333334;
             SD.Lambda = [760 850];
             SD.SpatialUnit = 'mm';
             % .nirs positions in a translated frame (as NIRx writes them)
-            src3 = [6.2315 2.4986 5.3080; 3.8717 -0.8599 9.0282; 8.3687 -1.1831 2.5487];
-            det3 = [5.1167 5.6349 3.7498; 3.5174 2.8261 7.7967; 7.0 -4.0 6.0];
+            src3 = [5.5 3.0 6.0; 3.0 -1.0 9.0; 8.0 -2.0 3.0];
+            det3 = [5.0 5.0 4.0; 3.5 3.0 7.5; 7.0 -4.0 6.0];
             SD.SrcPos = src3 * 10 + [30 20 -10];
             SD.DetPos = det3 * 10 + [30 20 -10];
             sd = [1 1; 1 2; 2 2; 3 3; 2 3];
@@ -682,24 +682,24 @@ classdef ExportTest < matlab.unittest.TestCase
             probeInfo.headmodel = 'ICBM152';
             probeInfo.probes.coords_s3 = src3;
             probeInfo.probes.coords_d3 = det3;
-            probeInfo.probes.coords_s2 = [0.39 0.21; 0.21 0; 0.62 0];
-            probeInfo.probes.coords_d2 = [0.30 0.40; 0.10 0.20; 0.50 0.10];
+            probeInfo.probes.coords_s2 = [0.10 0.50; 0.30 0.50; 0.50 0.50];
+            probeInfo.probes.coords_d2 = [0.20 0.70; 0.40 0.70; 0.60 0.30];
             probeInfo.probes.labels_s = {'FC4', 'C2', 'C6'};
             probeInfo.probes.labels_d = {'F4', 'FC2', 'FC6'};
             save(fullfile(folder, 'rec_probeInfo.mat'), 'probeInfo');
             fid = fopen(fullfile(folder, 'digpts.txt'), 'w');
-            fprintf(fid, ['nz: 0.4 85.9 -47.6\nar: 83.9 -16.6 -56.7\nal: -83.8 -18.6 -57.2\n', ...
-                'cz: -0.461 -8.416 101.365\niz: 0.2 -120.5 -25.8\ns1: 62.315 24.986 53.080\n']);
+            fprintf(fid, ['nz: 0 85 -45\nar: 82 -18 -55\nal: -82 -18 -55\n', ...
+                'cz: 0 -10 100\niz: 0 -118 -25\ns1: 55 30 60\n']);
             fclose(fid);
             roh = fullfile(tempdir, 'rec.roh');
             fid = fopen(roh, 'w');
-            fprintf(fid, '2024-01-30T14:35:24.461313;0;0;1;0;0.006;0.017\n2024-01-30T14:35:24.461313;0;0;1;1;0.029;0.058\n');
+            fprintf(fid, '2023-05-02T09:15:11.125000;0;0;1;0;0.006;0.017\n2023-05-02T09:15:11.125000;0;0;1;1;0.029;0.058\n');
             fclose(fid);
             zip(fullfile(folder, 'rec.zip'), roh);
             delete(roh);
 
             data = pf2.import.importNIRX(fullfile(folder, 'rec_config.hdr'), false, 'Model', 'NIRSport2');
-            testCase.verifyLessThan(abs(seconds(data.t0 - datetime(2024, 1, 30, 14, 35, 24.461313))), 1e-5, ...
+            testCase.verifyLessThan(abs(seconds(data.t0 - datetime(2023, 5, 2, 9, 15, 11.125))), 1e-5, ...
                 't0 should be the first .roh frame');
             testCase.verifyEqual(data.fs, 8.138020833333334, 'AbsTol', 1e-9);
             testCase.verifyEqual(data.probeinfo.Info.Name, 'NIRSport2');
@@ -715,14 +715,14 @@ classdef ExportTest < matlab.unittest.TestCase
             testCase.verifyEqual(string(h5read(filepath, '/nirs/probe/detectorLabels'))', string(probeInfo.probes.labels_d));
             testCase.verifyEqual(string(h5read(filepath, '/nirs/probe/landmarkLabels'))', ["Nz" "Iz" "LPA" "RPA" "Cz"]);
             lm = h5read(filepath, '/nirs/probe/landmarkPos3D')';
-            testCase.verifyEqual(lm(3, :), [-83.8 -18.6 -57.2 3], 'AbsTol', 1e-9);
+            testCase.verifyEqual(lm(3, :), [-82 -18 -55 3], 'AbsTol', 1e-9);
             % 'MNI' is not a BIDS/SNIRF coordinate system: it is kept in the
             % metadata and probe/coordinateSystem is not written
             probeNames = {h5info(filepath, '/nirs/probe').Datasets.Name};
             testCase.verifyFalse(ismember('coordinateSystem', probeNames));
             testCase.verifyEqual(char(h5read(filepath, '/nirs/metaDataTags/CoordinateSystem')), 'MNI');
             testCase.verifyTrue(contains(string(h5read(filepath, '/nirs/metaDataTags/CoordinateSystemDescription')), 'ICBM152'));
-            testCase.verifyEqual(char(h5read(filepath, '/nirs/metaDataTags/MeasurementTime')), '19:35:24.461+00:00');
+            testCase.verifyEqual(char(h5read(filepath, '/nirs/metaDataTags/MeasurementTime')), '13:15:11.125+00:00');
 
             reimported = pf2.import.importSNIRF(filepath, false);
             testCase.verifyEqual(char(reimported.device.CoordinateSystem), 'MNI');
@@ -736,10 +736,10 @@ classdef ExportTest < matlab.unittest.TestCase
             folder = tempname;
             mkdir(folder);
             testCase.addTeardown(@() rmdir(folder, 's'));
-            root = fullfile(folder, 'NIRS-2018-10-14_003');
+            root = fullfile(folder, 'NIRS-2020-01-01_001');
             writeHdr = @(events) testCase.writeText([root '.hdr'], sprintf([ ...
-                '[GeneralInfo]\nFileName="NIRS-2018-10-14_003"\nDate="Sun, 14 Oct 2018"\n', ...
-                'Time="14:56:25.725"\nDevice="NIRSport 8x8 Tandem"\n\n', ...
+                '[GeneralInfo]\nFileName="NIRS-2020-01-01_001"\nDate="Wed, 01 Jan 2020"\n', ...
+                'Time="10:00:00.000"\nDevice="NIRSport 8x8 Tandem"\n\n', ...
                 '[ImagingParameters]\nSources=2\nDetectors=3\nWavelengths="760\t850"\n', ...
                 'SamplingRate=7.812500\n\n[Markers]\nEvents="#\n%s#"\n\n', ...
                 '[DataStructure]\nS-D-Key="1-1:1,1-2:2,1-3:3,2-1:4,2-2:5,2-3:6,"\n', ...
@@ -764,7 +764,7 @@ classdef ExportTest < matlab.unittest.TestCase
             testCase.verifyEqual(data.raw(:, 4:6), wl2(:, [1 2 5]));
             testCase.verifyEqual(data.fs, 7.8125, 'AbsTol', 1e-9);
             testCase.verifyEqual(data.probeinfo.Info.Name, 'NIRSport 8x8 Tandem');
-            testCase.verifyLessThan(abs(seconds(data.t0 - datetime(2018, 10, 14, 14, 56, 25.725))), 1e-3);
+            testCase.verifyLessThan(abs(seconds(data.t0 - datetime(2020, 1, 1, 10, 0, 0))), 1e-3);
             p = data.probeinfo.Probe{1};
             testCase.verifyEqual(p.Wavelength, [760 850]);
             testCase.verifyEqual(p.SD, [3 sqrt(9 + 0.25) sqrt(18)], 'AbsTol', 1e-9); % cm

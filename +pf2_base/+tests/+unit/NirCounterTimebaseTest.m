@@ -63,9 +63,10 @@ classdef NirCounterTimebaseTest < matlab.unittest.TestCase
         end
 
         function testPCRestartsDuringBaseline(testCase)
-            % LW302 pattern: the PC column restarts several times while the
-            % counter continues; one counter reset falls where the PC
-            % clock is continuous. All times end up in the final PC frame.
+            % PC clock restarts during the baseline: the PC column restarts
+            % several times while the counter continues; one counter reset
+            % falls where the PC clock is continuous. All times end up in the
+            % final PC frame.
             rec = testCase.synthRun('Tick', 33/32768, 'Fs', 5, 'Duration', 1500, ...
                 'RestartAt', [55 80 120 180], 'ResetsAt', 100);
             [t, tb] = pf2_base.nirCounterTimebase(rec.pc, rec.counter, 'Model', '2000M');
@@ -137,7 +138,7 @@ classdef NirCounterTimebaseTest < matlab.unittest.TestCase
             mkdir(folder);
             testCase.addTeardown(@() rmdir(folder, 's'));
             rec = testCase.synthRun('Tick', 33/32768, 'Fs', 5, 'Duration', 900, 'ResetsAt', 500);
-            fname = fullfile(folder, 'TB_999_240621_141244_Dev1_P1_Sub999.nir');
+            fname = fullfile(folder, 'TB_999_200101_100000_Dev1_P1_Sub999.nir');
             testCase.writeNir(fname, rec, 60);
 
             prevGUI = pf2_base.channelCheckGUIEnabled(false);
@@ -213,10 +214,10 @@ classdef NirCounterTimebaseTest < matlab.unittest.TestCase
             c = onCleanup(@() fclose(fid));
             nl = sprintf('\r\n');
             fprintf(fid, ['COBI Studio Modern Light Data File\t1.2.7654.28485' nl ...
-                'Start Time:\tFri Jun 21 14:12:44.692 2024' nl ...
+                'Start Time:\tWed Jan 01 10:00:00.000 2020' nl ...
                 'SubjectID:\t999\tData Source:\tDevice 1, Model 2000M Imager, Port 1, HD, 18 optodes' nl ...
-                'Start Code:\t7640760090543\t39566' nl 'Freq Code:\t10000000' nl ...
-                'Current:\t30, 30, 30, 30, 3, 3' nl 'Gains:\t5, 7, 5, 6' nl 'Other:\tNone' nl ...
+                'Start Code:\t1000000000000\t40000' nl 'Freq Code:\t10000000' nl ...
+                'Current:\t30' nl 'Gains:\t5' nl 'Other:\tNone' nl ...
                 '-2\tBaseline Started' nl]);
             vals = 1000 + round(500 * rand(numel(rec.pc), 54));
             row = @(i) [sprintf('%.3f', rec.pc(i)), sprintf('\t%d', vals(i, :)), ...
