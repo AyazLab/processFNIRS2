@@ -68,7 +68,15 @@ if mergedProbe
     timeIndex = find(curCh.isTime);
     if isempty(timeIndex) || device.Info.TimeIsSampleCount
         if ~device.Info.TimeIsSampleCount && isempty(timeIndex)
-            warning('Time column could not be found, assuming each row contains samples only');
+            % Expected for devices whose raw data has no time column (e.g.
+            % NIRx), so it is shown once per session
+            persistent noTimeColumnNoted
+            if isempty(noTimeColumnNoted)
+                noTimeColumnNoted = true;
+                warning('pf2:updateCurrentDevice:noTimeColumn', ...
+                    ['Time column could not be found, assuming each row contains samples only. ', ...
+                     '(This note is shown once per session.)']);
+            end
         end
         if isempty(timeIndex)
             timeIndex = 0;
@@ -135,6 +143,14 @@ if mergedProbe
             fs = 1 ./ median(diff(resolvedTime));
         end
     end
+end
+
+% A counter time base (COBI .nir, see pf2_base.nirCounterTimebase) has its
+% rate from the fitted counter tick; the median step would round it to a
+% whole number of counts (4.99 Hz instead of 5.00 Hz on a 2000M)
+if ~isempty(fs) && isfield(dataStruct, 'info') && isstruct(dataStruct.info) ...
+        && isfield(dataStruct.info, 'timebase') && isfield(dataStruct.info.timebase, 'fs')
+    fs = dataStruct.info.timebase.fs;
 end
 
 % Pack results

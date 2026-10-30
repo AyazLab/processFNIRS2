@@ -74,7 +74,7 @@ classdef RoundtripTest < matlab.unittest.TestCase
 
             % Export should complete without error
             testCase.verifyWarningFree(@() pf2.export.asSNIRF(...
-                testCase.sampleData, outputPath), ...
+                testCase.sampleData, outputPath, 'TimeZone', 'UTC'), ...
                 'SNIRF export should complete without warnings');
 
             % Verify file was created
@@ -277,8 +277,8 @@ classdef RoundtripTest < matlab.unittest.TestCase
 
             snirfPath = fullfile(testCase.tempDir, 'test_overwrite.snirf');
 
-            % First export
-            pf2.export.asSNIRF(testCase.sampleData, snirfPath);
+            % First export (same options as the overwrite below)
+            pf2.export.asSNIRF(testCase.sampleData, snirfPath, 'TimeZone', 'UTC');
 
             % Verify first export succeeded
             testCase.verifyTrue(isfile(snirfPath), ...
@@ -288,7 +288,7 @@ classdef RoundtripTest < matlab.unittest.TestCase
 
             % Second export (overwrite) - should complete without error
             testCase.verifyWarningFree(@() pf2.export.asSNIRF(...
-                testCase.sampleData, snirfPath), ...
+                testCase.sampleData, snirfPath, 'TimeZone', 'UTC'), ...
                 'Second export should complete without warnings');
 
             % File should still exist after overwrite

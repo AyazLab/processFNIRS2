@@ -1,5 +1,31 @@
 # Changelog
 
+## v1.2.2 (2026-10-30)
+NIRx import and SNIRF export follow-ups: vendor geometry, NIRStar recordings without a `.nirs` file, and recording start times.
+
+### Added
+
+- `pf2.import.importNIRX` accepts `'Model'` (for example `'NIRSport2'`) to name the device when the `.hdr` only records a serial `Device ID`, as Aurora writes it.
+
+### Changed
+
+- `pf2.export.asSNIRF` writes `MeasurementDate` and `MeasurementTime` in UTC (`+00:00`) when the recording's time zone is known, with the zone in `MeasurementTimeZone`. MNE drops the UTC offset when it reads `MeasurementTime`, so a local time with an offset was read as UTC.
+- The "Time column could not be found" warning from device setup in `processFNIRS2` is shown once per session (`pf2:updateCurrentDevice:noTimeColumn`). It is expected for devices whose raw data has no time column, such as NIRx, and was repeated for every recording.
+- `pf2.import.importNIR` no longer stores the marker file index in `Amplitude`. When markers come from more than one `.mrk` file, a `MarkerSource` column holds the file each came from; with one file there is no extra column and `Amplitude` keeps its default of 1, which SNIRF export does not write. The marker documentation now describes the `.mrk` columns as they are read.
+
+### Fixes
+
+- `pf2.import.importNIR` builds the time base of COBI Studio Modern files from the sample counter with a fitted tick (`pf2_base.nirCounterTimebase`). The counter was read as 1 kHz, but on the 2000M it ticks at 32768/33 Hz, so time ran 0.70% fast (about 25 s per hour) and fs came out 5.025 Hz instead of 5.000 Hz. Segments between counter resets were stitched with the PC time difference across the reset, which includes the delivery delay before each dropout, so the error grew with each reset. Now the tick is fitted per segment as the lower envelope of PC time against the counter (segments of 600 s or more; shorter ones use the pooled tick, else 33/32768 s on the 2000M and 1 ms on the 2000S and 3000C), each segment is anchored to its PC latency floor, gaps at resets keep their measured length, PC clock restarts and steps back are carried across by the counter, PC jumps ahead and counter pauses at dropouts are placed on the PC clock, and fs is 1/(tick x mean counts per sample). Segment, gap and latency QC is stored in `info.timebase`, and device setup in `processFNIRS2` keeps that fs. A short 2000M, 2000S or 3000C recording whose counter is still below 100000 is now recognised by its steady step. 1200W files stay on the PC time column.
+- `pf2.export.asSNIRF` writes the measurement list as SNIRF defines it: `dataType`, `dataTypeIndex`, `sourceIndex`, `detectorIndex` and `wavelengthIndex` as integers (they were doubles, which the SNIRF validator rejects), and no `dataTypeLabel` (`raw-DC` is not a SNIRF label; labels are defined for processed data) or `dataUnit`. MNE 1.13 refuses files whose `dataUnit` is `au`. `importSNIRF` reads the integer fields as doubles and finds raw channels by `dataType` when de-normalizing.
+- `pf2.export.asSNIRF` no longer writes `.info` fields that identify or describe a person (names, date of birth, age, sex, experimenter or operator, contact details, free-text notes) unless `'IncludeIdentifying'` is true, and writes only the file name of path values. The `.nir` filename was written with the full local path, including the user name.
+- `pf2.import.importNIRX` uses the vendor coordinate set from `<root>_probeInfo.mat` when present, the source of the positions in NIRx's own SNIRF: 3D positions in mm, the vendor 2D layout, 10-10 optode labels, and the head model as the coordinate system (ICBM152 is declared as MNI). Landmarks (Nz, Iz, LPA, RPA, Cz) are read from `digpts.txt`. The `.nirs` `SD` positions it used before are in a translated frame.
+- `pf2.import.importNIRX` imports NIRStar recordings that have no `.nirs` file. It errored on an undefined variable and built no device. Channels now come from the `.hdr` `S-D-Key` and `S-D-Mask`, data from the `.wl1`/`.wl2` files, geometry from `<root>_probeInfo.mat`, and markers from the `.hdr` `Events` or, when there are none, the `.evt` trigger bits. `.hdr` `Events` rows no longer read the frame number as the duration. A `_probeInfo.mat` that lists more optodes than the recording uses is accepted, and a recording without markers gets an empty marker table.
+- `pf2.import.importNIRX` sets `t0` from the first frame of the raw `.roh` stream, read from inside `<root>.zip` without extracting it, when present; this is the start time NIRx's own SNIRF reports. It reads the Aurora `Sampling rate` header key.
+- `pf2.export.asSNIRF` writes source and detector labels and landmarks (`landmarkPos3D` with a label index and a 1-D `landmarkLabels`), and declares the device coordinate system. BIDS identifiers go to `probe/coordinateSystem`; other tags such as `MNI` go to the `CoordinateSystem` and `CoordinateSystemDescription` metadata tags, which `importSNIRF` restores, since `Other` draws a validator warning.
+- `pf2.import.importSNIRF` converts `UnixTime` to the recording's `MeasurementTimeZone` instead of attaching the zone to the UTC clock time, which shifted `t0` by the zone's offset. A `MeasurementTime` with a UTC offset is parsed, and a time without a zone stays zone-less instead of taking this machine's zone.
+- `pf2.import.importSNIRF` reads landmark labels stored as fixed-width strings, as NIRx writes them; such files failed to import.
+- `pf2_base.tests.integration.RoundtripTest` export checks pass a time zone, since exporting without one now warns.
+
 ## v1.2.1 (2026-10-16)
 Groundwork for running headless single-subject processing under GNU Octave.
 

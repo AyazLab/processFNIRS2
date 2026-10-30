@@ -38,15 +38,22 @@ function [snirfData] = asSNIRF(fNIRcells, filepath, varargin)
 %   'StripExtraRawChannels'  - Strip dark/ambient channels (default: false)
 %   'Verbose'                - Print progress messages (default: true)
 %   'TimeZone'               - Also accepted in single-file mode (see below)
+%   'IncludeIdentifying'     - Also accepted in single-file mode (see below)
 %
 % Name-Value Parameters:
 %   'TimeZone'  - Time zone of the recording's wall-clock start time (t0),
 %                 e.g. 'America/New_York' or '-05:00' (default: ''). Applied
 %                 when t0 has no zone of its own; never taken from this
-%                 machine. With a zone, MeasurementTime carries its UTC offset
-%                 and UnixTime/AcquisitionStartTime are written. Without one,
+%                 machine. With a zone, MeasurementDate/MeasurementTime are
+%                 written in UTC (offset +00:00), MeasurementTimeZone keeps
+%                 the zone, and UnixTime/AcquisitionStartTime are written. Without one,
 %                 MeasurementTime has no offset, UnixTime is omitted and
 %                 'pf2:asSNIRF:noTimeZone' is warned.
+%   'IncludeIdentifying' - Write .info fields that identify or describe a
+%                 person (names, date of birth, age, sex, experimenter or
+%                 operator, contact details, free-text notes) to
+%                 metaDataTags (default: false). Path-like values are always
+%                 reduced to the file name.
 %
 % Outputs:
 %   snirfData            - Generated SNIRF data structure
@@ -136,7 +143,8 @@ if isBatchMode
         end
         pf2.export.asSNIRF(fNIRcells{i}, paths{i}, ...
             batchOpts.NormalizeRaw, batchOpts.StripExtraRawChannels, ...
-            'TimeZone', batchOpts.TimeZone);
+            'TimeZone', batchOpts.TimeZone, ...
+            'IncludeIdentifying', batchOpts.IncludeIdentifying);
     end
     if batchOpts.Verbose
         fprintf('Batch export complete: %d files written to %s\n', n, filepath);
@@ -163,10 +171,12 @@ p.KeepUnmatched = true;
 p.addParameter('NormalizeRaw', normalizeRaw, @(x) islogical(x) || isnumeric(x));
 p.addParameter('StripExtraRawChannels', stripExtraRawChannels, @(x) islogical(x) || isnumeric(x));
 p.addParameter('TimeZone', '', @(x) ischar(x) || isstring(x));
+p.addParameter('IncludeIdentifying', false, @(x) islogical(x) || isnumeric(x));
 p.parse(args{:});
 normalizeRaw = p.Results.NormalizeRaw;
 stripExtraRawChannels = p.Results.StripExtraRawChannels;
 timeZone = char(p.Results.TimeZone);
+includeIdentifying = logical(p.Results.IncludeIdentifying);
 
 [ filepathdir, filename, ext ] = fileparts(filepath);
 
@@ -199,7 +209,7 @@ for n = 1:numNIRS
     curNIRdata = [];
 
     % Convert info to metadata with enhanced field mapping
-    metaDataTags = info2meta(curStruct, timeZone);
+    metaDataTags = info2meta(curStruct, timeZone, includeIdentifying);
 
     % Build probe structure and measurement list
     [probe, measurementList, probeMetaData, rawMax, forceStrippedChannelsMask] = buildProbe(curStruct);
@@ -251,17 +261,6 @@ for n = 1:numNIRS
         data.dataTimeSeries = data.dataTimeSeries(:, ~extraChannels);
     end
 
-    % Add units to measurement list (improves compatibility)
-    for k = 1:length(data.measurementList)
-        if ~isfield(data.measurementList(k), 'dataUnit') || isempty(data.measurementList(k).dataUnit)
-            if strcmp(data.measurementList(k).dataTypeLabel, 'raw-DC')
-                data.measurementList(k).dataUnit = c2v('V'); % Or appropriate unit
-            elseif strcmp(data.measurementList(k).dataTypeLabel, 'raw-DC-dark')
-                data.measurementList(k).dataUnit = c2v('V'); % Or appropriate unit
-            end
-        end
-    end
-
     % Handle data normalization if requested
     if(normalizeRaw)
         rawDC_channels = rawDCchannels | rawDCdarkChannels;
@@ -283,6 +282,8 @@ for n = 1:numNIRS
         metaDataTags.('Normalized') = c2v('true');
         data.dataTimeSeries(:, rawDC_channels) = normalizedData;
     end
+
+    data.measurementList = toSnirfMeasurementList(data.measurementList);
 
     % Set up stimulus data
     stim = [];
@@ -479,12 +480,6 @@ for n = 1:numNIRS
         end
     end
 
-    % Add coordinate system info to probe (helpful for spatial interpretation)
-    if ~isfield(probe, 'coordinateSystem')
-        probe.coordinateSystem = c2v('Other');
-        probe.coordinateSystemDescription = c2v('Probe coordinate system');
-    end
-    
     % Assemble final structure
     curNIRdata.metaDataTags = metaDataTags;
     curNIRdata.probe = probe;
@@ -529,6 +524,21 @@ function name = dictLabel(dictTbl, code, fallback)
     end
 end
 
+function out = stripPath(val, isPathField)
+    % STRIPPATH Keep only the file name of a path: for path fields always,
+    % for other fields when the value is an absolute path (which can hold
+    % a user name)
+    out = val;
+    isAbsolute = ~isempty(regexp(val, '^(/|~|[A-Za-z]:[\\/]|\\\\)', 'once'));
+    if (isPathField || isAbsolute) && ~isempty(regexp(val, '[\\/]', 'once'))
+        parts = regexp(val, '[\\/]', 'split');
+        parts = parts(~cellfun(@isempty, parts));
+        if ~isempty(parts)
+            out = parts{end};
+        end
+    end
+end
+
 function [dt, hasClock] = toDatetime(val)
     % TODATETIME Parse a datetime or ISO-style date/time string; [] if not parseable
     dt = [];
@@ -568,9 +578,19 @@ function charOut = c2v(str)
     charOut = char(str);
 end
 
-function metaData = info2meta(nirStruct, timeZone)
+function metaData = info2meta(nirStruct, timeZone, includeIdentifying)
     % Enhanced metadata conversion with support for all requested fields
     if nargin < 2, timeZone = ''; end
+    if nargin < 3, includeIdentifying = false; end
+
+    % Fields that identify or describe a person; written only with
+    % IncludeIdentifying (demographics belong in BIDS participants.tsv)
+    identKeys = {'subjectname', 'name', 'patientname', 'firstname', 'givenname', ...
+        'lastname', 'surname', 'middlename', 'dateofbirth', 'dob', 'birthdate', ...
+        'age', 'sex', 'gender', 'experimenter', 'operator', 'initials', ...
+        'contact_info', 'contactinfo', 'email', 'phone', 'address', 'remarks', 'notes'};
+    % Fields holding file paths; only the file name is written
+    pathKeys = {'filename', 'filepath', 'fname', 'path', 'montage_path', 'folder', 'directory'};
     
     metaData = [];
     
@@ -633,7 +653,13 @@ function metaData = info2meta(nirStruct, timeZone)
                      'without a UTC offset and UnixTime is omitted. Pass ''TimeZone'' ' ...
                      '(e.g. ''America/New_York'') to write absolute times.']);
             else
-                metaData.MeasurementTime = c2v(char(datetime(t0, 'Format', 'HH:mm:ss.SSSxxx')));
+                % Date and time are written in UTC (+00:00): some readers
+                % (MNE) drop the offset and would misplace a local time.
+                % MeasurementTimeZone keeps the recording's zone.
+                t0utc = t0;
+                t0utc.TimeZone = 'UTC';
+                metaData.MeasurementDate = c2v(char(datetime(t0utc, 'Format', 'yyyy-MM-dd')));
+                metaData.MeasurementTime = c2v(char(datetime(t0utc, 'Format', 'HH:mm:ss.SSSxxx')));
                 metaData.MeasurementTimeZone = c2v(t0.TimeZone);
                 tStart = 0;
                 if isfield(nirStruct, 'time') && ~isempty(nirStruct.time)
@@ -723,6 +749,12 @@ function metaData = info2meta(nirStruct, timeZone)
         if ismember(mappedName, t0Tags) || ismember(fieldName, t0Tags) || strcmp(fieldName, 'StartDateTime')
             continue;
         end
+        if ~includeIdentifying && (ismember(lower(fieldName), identKeys) || ismember(lower(mappedName), identKeys))
+            continue;
+        end
+        if (ischar(fieldValue) || isstring(fieldValue)) && ~isempty(fieldValue)
+            fieldValue = stripPath(char(fieldValue), ismember(lower(fieldName), pathKeys));
+        end
 
         % Process field value based on type
         if (isstring(fieldValue) || ischar(fieldValue)) && ~isempty(fieldValue)
@@ -751,7 +783,7 @@ function metaData = info2meta(nirStruct, timeZone)
     end
     
     % Process composite name fields if they exist
-    if ~isfield(metaData, 'SubjectName') && (isfield(metaData, 'lastName') || isfield(metaData, 'firstName'))
+    if includeIdentifying && ~isfield(metaData, 'SubjectName') && (isfield(metaData, 'lastName') || isfield(metaData, 'firstName'))
         lastName = '';
         firstName = '';
         middleName = '';
@@ -892,7 +924,6 @@ function [probe, measurementList, deviceMetaDataTags, rawMax, strippedChannelsMa
                 measurement.wavelengthIndex = wvI(i);
             end
             measurement.wavelengthActual = wvList(darkIdx);
-            measurement.dataUnit = c2v('au');
         else
             measurement.dataType = 1; 
             measurement.dataTypeIndex = 1;
@@ -907,7 +938,6 @@ function [probe, measurementList, deviceMetaDataTags, rawMax, strippedChannelsMa
                 measurement.wavelengthIndex = wvI(i);
                 measurement.wavelengthActual = wvList(measurement.wavelengthIndex);
             end
-            measurement.dataUnit = c2v('au');
         end
       
         measurementList = [measurementList; measurement];
@@ -976,28 +1006,85 @@ function [probe, measurementList, deviceMetaDataTags, rawMax, strippedChannelsMa
         probe.sourcePos3D   = table2array(probeStruct.SrcPos(:, {'x', 'y', 'z'}));
     end
 
-    % Include landmark positions if available
-    if isfield(probeStruct, 'landmarkPos3D')
-        probe.landmarkPos3D = probeStruct.landmarkPos3D;
+    % Landmarks: [x y z index] rows with a 1-D landmarkLabels string array
+    if isfield(probeStruct, 'landmarkPos3D') && ~isempty(probeStruct.landmarkPos3D)
+        lmPos = probeStruct.landmarkPos3D(:, 1:3);
+        probe.landmarkPos3D = [lmPos, (1:size(lmPos, 1))'];
+        if isfield(probeStruct, 'landmarkLabels') && numel(probeStruct.landmarkLabels) == size(lmPos, 1)
+            probe.landmarkLabels = string(probeStruct.landmarkLabels(:))';
+        end
     end
-    if isfield(probeStruct, 'landmarkLabels')
-        probe.landmarkLabels = probeStruct.landmarkLabels;
+
+    % Source and detector labels, when there is one per written position
+    srcLabels = posLabels(probeStruct, 'SrcPos');
+    if ~isempty(srcLabels) && numel(srcLabels) == size(probe.sourcePos3D, 1)
+        probe.sourceLabels = srcLabels;
     end
-    
-    % Add source and detector labels if available
-    if isfield(probeStruct, 'SrcPos') && isfield(probeStruct.SrcPos, 'Label')
-        probe.sourceLabels = probeStruct.SrcPos.Label;
+    detLabels = posLabels(probeStruct, 'DetPos');
+    if ~isempty(detLabels) && numel(detLabels) == size(probe.detectorPos3D, 1)
+        probe.detectorLabels = detLabels;
     end
-    if isfield(probeStruct, 'DetPos') && isfield(probeStruct.DetPos, 'Label')
-        probe.detectorLabels = probeStruct.DetPos.Label;
+
+    % Coordinate system: BIDS identifiers go to probe/coordinateSystem. Any
+    % other device tag (e.g. 'MNI') is not a recognized SNIRF/BIDS system
+    % ('Other' draws a validator warning), so it and its description go to
+    % metaDataTags.CoordinateSystem(Description), which importSNIRF reads
+    sysName = '';
+    sysDesc = '';
+    if isfield(deviceInfoFields, 'CoordinateSystem') && ~isempty(deviceInfoFields.CoordinateSystem)
+        sysName = char(deviceInfoFields.CoordinateSystem);
     end
-    
-    % Add coordinate system info
-    probe.coordinateSystem = c2v('Other');
-    probe.coordinateSystemDescription = c2v('Probe-specific coordinate system');
+    if isfield(deviceInfoFields, 'CoordinateSystemDescription') && ~isempty(deviceInfoFields.CoordinateSystemDescription)
+        sysDesc = char(deviceInfoFields.CoordinateSystemDescription);
+    end
+    bidsIds = {'MNI152NLin2009cAsym', 'MNI152NLin6Asym', 'fsaverage', 'CapTrak'};
+    isBids = strcmpi(sysName, bidsIds);
+    if any(isBids)
+        probe.coordinateSystem = c2v(bidsIds{isBids});
+        if ~isempty(sysDesc)
+            probe.coordinateSystemDescription = c2v(sysDesc);
+        end
+    elseif ~isempty(sysName) && ~any(strcmpi(sysName, {'Other', 'Unknown'}))
+        deviceMetaDataTags.CoordinateSystem = c2v(sysName);
+        if ~isempty(sysDesc)
+            deviceMetaDataTags.CoordinateSystemDescription = c2v(sysDesc);
+        end
+    end
      
     % Add wavelengths
     probe.wavelengths = wvList(~isnan(wvList));
+end
+
+
+function ml = toSnirfMeasurementList(ml)
+    % TOSNIRFMEASUREMENTLIST Measurement list as SNIRF stores it: index and
+    % type fields as integers; no dataTypeLabel (defined for processed data
+    % only, dataType 99999) and no dataUnit (optional; MNE >= 1.13 rejects
+    % 'au'). The labels are only used in memory to find dark channels.
+    if isempty(ml), return; end
+    ml = rmfield(ml, intersect(fieldnames(ml), {'dataTypeLabel', 'dataUnit'}));
+    intFields = intersect(fieldnames(ml), ...
+        {'dataType', 'dataTypeIndex', 'sourceIndex', 'detectorIndex', 'wavelengthIndex'});
+    for k = 1:numel(ml)
+        for f = 1:numel(intFields)
+            v = double(ml(k).(intFields{f}));
+            v(isnan(v)) = 0;
+            ml(k).(intFields{f}) = int32(v);
+        end
+    end
+end
+
+
+function labels = posLabels(probeStruct, field)
+    % POSLABELS Optode labels from a SrcPos/DetPos table as a string row; [] if none
+    labels = [];
+    if isfield(probeStruct, field) && istable(probeStruct.(field)) ...
+            && ismember('Label', probeStruct.(field).Properties.VariableNames)
+        labels = string(probeStruct.(field).Label(:))';
+        if any(ismissing(labels) | strlength(labels) == 0)
+            labels = [];
+        end
+    end
 end
 
 
@@ -1013,6 +1100,7 @@ function opts = parseBatchOpts(varargin)
     p.addParameter('StripExtraRawChannels', false, @islogical);
     p.addParameter('Verbose', true, @islogical);
     p.addParameter('TimeZone', '', @(x) ischar(x) || isstring(x));
+    p.addParameter('IncludeIdentifying', false, @(x) islogical(x) || isnumeric(x));
     p.parse(varargin{:});
     opts = p.Results;
 end
