@@ -423,8 +423,9 @@ classdef ExportTest < matlab.unittest.TestCase
             testCase.assumeTrue(isfield(testCase.ProcessedData, 'HbR'), ...
                 'Processed data missing HbR field');
 
-            % Export should not error
-            testCase.verifyWarningFree(@() pf2.export.asSNIRF(testCase.ProcessedData, filepath), ...
+            % Export should not error (a zone is given: without one the
+            % pf2:asSNIRF:noTimeZone warning is expected)
+            testCase.verifyWarningFree(@() pf2.export.asSNIRF(testCase.ProcessedData, filepath, 'TimeZone', 'UTC'), ...
                 'SNIRF export with processed data should not produce warnings');
 
             % Verify file was created with substantial content
@@ -435,6 +436,151 @@ classdef ExportTest < matlab.unittest.TestCase
     end
 
     %% Edge Case Tests
+    methods (Test, TestTags = {'SNIRF', 'Export', 'Metadata'})
+        function testExportSNIRFStimDataLabelsSingleDataset(testCase)
+            % Stim column labels are one 1-D dataLabels dataset (SNIRF spec),
+            % not dataLabels1..N
+            data = testCase.RawData;
+            testCase.assumeNotEmpty(data.markers, 'Sample data has no markers');
+            data.markers.Amplitude = (1:height(data.markers))';
+            filepath = testCase.createTempPath('.snirf');
+            pf2.export.asSNIRF(data, filepath, 'TimeZone', 'UTC');
+
+            info = h5info(filepath, '/nirs/stim1');
+            names = {info.Datasets.Name};
+            testCase.verifyTrue(ismember('dataLabels', names));
+            testCase.verifyFalse(any(startsWith(names, 'dataLabels1')));
+            ds = info.Datasets(strcmp(names, 'dataLabels'));
+            testCase.verifyEqual(numel(ds.Dataspace.Size), 1, 'dataLabels should be 1-D');
+            labels = string(h5read(filepath, '/nirs/stim1/dataLabels'));
+            testCase.verifyEqual(labels(:)', ["startTime" "duration" "value" "Amplitude"]);
+        end
+
+        function testExportSNIRFDropsDefaultAmplitude(testCase)
+            % An all-1 Amplitude column is the default fill and is not written
+            data = testCase.RawData;
+            testCase.assumeNotEmpty(data.markers, 'Sample data has no markers');
+            data.markers.Amplitude(:) = 1;
+            filepath = testCase.createTempPath('.snirf');
+            pf2.export.asSNIRF(data, filepath, 'TimeZone', 'UTC');
+
+            stimData = h5read(filepath, '/nirs/stim1/data');
+            testCase.verifyEqual(size(stimData, 1), 3, 'Stim data should have 3 columns');
+            info = h5info(filepath, '/nirs/stim1');
+            testCase.verifyFalse(ismember('dataLabels', {info.Datasets.Name}));
+        end
+
+        function testExportSNIRFTimeZoneOption(testCase)
+            % A zoneless t0 takes its zone from the TimeZone option
+            data = testCase.RawData;
+            data.t0 = datetime(2014, 5, 19, 10, 22, 45);
+            filepath = testCase.createTempPath('.snirf');
+            pf2.export.asSNIRF(data, filepath, 'TimeZone', 'America/New_York');
+
+            unixTime = str2double(h5read(filepath, '/nirs/metaDataTags/UnixTime'));
+            expected = posixtime(datetime(2014, 5, 19, 14, 22, 45, 'TimeZone', 'UTC'));
+            testCase.verifyEqual(unixTime, expected, 'AbsTol', 1e-3);
+            testCase.verifyEqual(char(h5read(filepath, '/nirs/metaDataTags/MeasurementTime')), ...
+                '10:22:45.000-04:00');
+            testCase.verifyEqual(char(h5read(filepath, '/nirs/metaDataTags/MeasurementDate')), ...
+                '2014-05-19');
+        end
+
+        function testExportSNIRFNoTimeZoneOmitsUnixTime(testCase)
+            % Without a zone, no absolute time is written and none is guessed
+            data = testCase.RawData;
+            data.t0 = datetime(2014, 5, 19, 10, 22, 45);
+            filepath = testCase.createTempPath('.snirf');
+            prev = warning('on', 'pf2:asSNIRF:noTimeZone'); % other tests may leave warnings off
+            testCase.addTeardown(@() warning(prev));
+            testCase.verifyWarning(@() pf2.export.asSNIRF(data, filepath), ...
+                'pf2:asSNIRF:noTimeZone');
+
+            info = h5info(filepath, '/nirs/metaDataTags');
+            names = {info.Datasets.Name};
+            testCase.verifyFalse(ismember('UnixTime', names));
+            testCase.verifyEqual(char(h5read(filepath, '/nirs/metaDataTags/MeasurementTime')), ...
+                '10:22:45.000');
+        end
+
+        function testExportSNIRFNonISODateNotWritten(testCase)
+            % An info date that does not parse is not written as MeasurementDate
+            data = testCase.RawData;
+            if isfield(data, 't0'), data = rmfield(data, 't0'); end
+            data.info.Date = 'Thursday the 14th';
+            filepath = testCase.createTempPath('.snirf');
+            pf2.export.asSNIRF(data, filepath);
+
+            info = h5info(filepath, '/nirs/metaDataTags');
+            testCase.verifyFalse(ismember('MeasurementDate', {info.Datasets.Name}));
+        end
+
+        function testExportSNIRFOneDimensionalVectors(testCase)
+            % probe/wavelengths and data/time are 1-D datasets
+            filepath = testCase.createTempPath('.snirf');
+            pf2.export.asSNIRF(testCase.RawData, filepath, 'TimeZone', 'UTC');
+
+            info = h5info(filepath, '/nirs/probe/wavelengths');
+            testCase.verifyEqual(numel(info.Dataspace.Size), 1);
+            info = h5info(filepath, '/nirs/data1/time');
+            testCase.verifyEqual(numel(info.Dataspace.Size), 1);
+        end
+
+        function testExportSNIRFFromNIRx(testCase)
+            % NIRx import reads the .hdr start time and Device ID, keeps 3D
+            % positions in mm, builds a 2D layout and drops all-zero aux
+            folder = tempname;
+            mkdir(folder);
+            testCase.addTeardown(@() rmdir(folder, 's'));
+            fid = fopen(fullfile(folder, 'rec.hdr'), 'w');
+            fprintf(fid, ['[GeneralInfo]\nDate="2019-03-14 14:32:17.312000"\n', ...
+                'Device ID="NSP2-1234"\n\n[ImagingParameters]\nSamplingRate=7.812500\n']);
+            fclose(fid);
+            % Optodes on an 80 mm sphere around the origin (head coordinates)
+            dirs = @(az, el) 80 * [cosd(el) .* cosd(az), cosd(el) .* sind(az), sind(el)];
+            t = (0:99)' / 7.8125;
+            SD.Lambda = [760 850];
+            SD.SpatialUnit = 'mm';
+            SD.SrcPos = dirs([70; 110; 90], [60; 60; 40]);
+            SD.DetPos = dirs([90; 60; 120; 92], [60; 45; 45; 43]);
+            sd = sortrows([1 1; 2 1; 1 2; 2 3; 3 4; 1 4]); % channel order: sorted pairs
+            SD.MeasList = [sd ones(6, 1) ones(6, 1); sd ones(6, 1) 2 * ones(6, 1)];
+            d = rand(100, 12) + 1; %#ok<NASGU>
+            s = zeros(100, 1); s(10) = 1; %#ok<NASGU>
+            aux = [zeros(100, 1), (1:100)']; %#ok<NASGU>
+            save(fullfile(folder, 'rec.nirs'), 't', 'd', 's', 'SD', 'aux');
+
+            data = pf2.import.importNIRX(fullfile(folder, 'rec.hdr'), false);
+            testCase.verifyEqual(data.t0, datetime(2019, 3, 14, 14, 32, 17.312), 'AbsTol', seconds(1e-3));
+            testCase.verifyEqual(data.probeinfo.Info.Name, 'NIRSport2');
+            testCase.verifyEqual(size(data.Aux.NIRx, 2), 1, 'All-zero aux column should be dropped');
+            p = data.probeinfo.Probe{1};
+            src3D = [p.SrcPos.x p.SrcPos.y p.SrcPos.z];
+            testCase.verifyEqual(src3D, SD.SrcPos, 'AbsTol', 1e-9, '3D positions should stay in mm');
+            sd3D = sqrt(sum((SD.SrcPos(sd(:, 1), :) - SD.DetPos(sd(:, 2), :)).^2, 2))' / 10;
+            testCase.verifyEqual(p.SD, sd3D, 'AbsTol', 1e-9, 'SD distances should be 3D, in cm');
+            % 2D layout: a flat top view (right on the right, anterior up),
+            % with distances close to the 3D ones
+            src2D = [p.SrcPos.x_2d p.SrcPos.y_2d];
+            testCase.verifyEqual(p.SrcPos.z_2d, zeros(3, 1));
+            testCase.verifyGreaterThan(src2D(1, 1), src2D(2, 1));
+            testCase.verifyGreaterThan(src2D(3, 2), src2D(1, 2));
+            det2D = [p.DetPos.x_2d p.DetPos.y_2d];
+            sd2D = sqrt(sum((src2D(sd(:, 1), :) - det2D(sd(:, 2), :)).^2, 2))' / 10;
+            testCase.verifyEqual(sd2D, sd3D, 'RelTol', 0.2);
+
+            filepath = testCase.createTempPath('.snirf');
+            pf2.export.asSNIRF(data, filepath, 'TimeZone', 'Europe/Berlin');
+            testCase.verifyEqual(h5read(filepath, '/nirs/probe/wavelengths'), [760; 850]);
+            testCase.verifyEqual(char(h5read(filepath, '/nirs/metaDataTags/LengthUnit')), 'mm');
+            testCase.verifyEqual(char(h5read(filepath, '/nirs/metaDataTags/Model')), 'NIRSport2');
+            testCase.verifyEqual(char(h5read(filepath, '/nirs/metaDataTags/MeasurementDate')), '2019-03-14');
+            testCase.verifyEqual(char(h5read(filepath, '/nirs/metaDataTags/MeasurementTime')), '14:32:17.312+01:00');
+            srcPos = h5read(filepath, '/nirs/probe/sourcePos3D')';
+            testCase.verifyEqual(srcPos, SD.SrcPos, 'AbsTol', 1e-6);
+        end
+    end
+
     methods (Test, TestTags = {'EdgeCase', 'Export'})
         function testExportSNIRFCreatesDirectory(testCase)
             % TESTEXPORTSNIRFCREATESDIRECTORY Verify export creates parent directory if needed

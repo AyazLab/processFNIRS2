@@ -51,6 +51,14 @@ function [fNIR] = importNIR(nir_filename, mrk_filename, channelCheck, varargin)
 %   - Baseline data is included as continuous recording (t < 0)
 %   - Channel check results are cached in {filename}_pf2mask.mat
 %   - Requires device configuration to be loaded (pf2.settings.selectDevice)
+%   - Marker columns from .mrk files: the third column is read as Duration.
+%     COBI Studio writes a running counter there rather than an event
+%     duration, so durations from COBI .mrk files are not event lengths
+%     (pf2.export.asNIR writes real durations in that column). Markers from
+%     manual marker files get Duration 100. Amplitude holds the index of the
+%     .mrk file the marker came from (1 = <name>.mrk, 2 = <name>_C.mrk, ...).
+%   - t0 is the header Start Time as local wall-clock time with no time zone;
+%     pass 'TimeZone' to pf2.export.asSNIRF to write absolute times.
 %
 % Example:
 %   % Interactive file selection

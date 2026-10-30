@@ -37,6 +37,16 @@ function [snirfData] = asSNIRF(fNIRcells, filepath, varargin)
 %   'NormalizeRaw'           - Normalize raw data (default: false)
 %   'StripExtraRawChannels'  - Strip dark/ambient channels (default: false)
 %   'Verbose'                - Print progress messages (default: true)
+%   'TimeZone'               - Also accepted in single-file mode (see below)
+%
+% Name-Value Parameters:
+%   'TimeZone'  - Time zone of the recording's wall-clock start time (t0),
+%                 e.g. 'America/New_York' or '-05:00' (default: ''). Applied
+%                 when t0 has no zone of its own; never taken from this
+%                 machine. With a zone, MeasurementTime carries its UTC offset
+%                 and UnixTime/AcquisitionStartTime are written. Without one,
+%                 MeasurementTime has no offset, UnixTime is omitted and
+%                 'pf2:asSNIRF:noTimeZone' is warned.
 %
 % Outputs:
 %   snirfData            - Generated SNIRF data structure
@@ -50,8 +60,12 @@ function [snirfData] = asSNIRF(fNIRcells, filepath, varargin)
 %           /time [T x 1]
 %       /probe/          - Probe geometry
 %           /sourcePos, /detectorPos, /wavelengths, etc.
-%       /metaDataTags/   - Subject and session info
-%       /stim/           - Stimulus/marker events
+%       /metaDataTags/   - Subject and session info. MeasurementDate is
+%                          written only from a parsed date (yyyy-MM-dd).
+%       /stim/           - Stimulus/marker events [startTime duration value
+%                          extras...]. Duration is the marker table's
+%                          Duration column as imported. An Amplitude column
+%                          that is all 1 (the default) is not written.
 %
 % Notes:
 %   - Creates output directory if it doesn't exist
@@ -121,7 +135,8 @@ if isBatchMode
             fprintf('  Exporting %d/%d: %s\n', i, n, paths{i});
         end
         pf2.export.asSNIRF(fNIRcells{i}, paths{i}, ...
-            batchOpts.NormalizeRaw, batchOpts.StripExtraRawChannels);
+            batchOpts.NormalizeRaw, batchOpts.StripExtraRawChannels, ...
+            'TimeZone', batchOpts.TimeZone);
     end
     if batchOpts.Verbose
         fprintf('Batch export complete: %d files written to %s\n', n, filepath);
@@ -133,15 +148,25 @@ end
 % --- Single/multi-run mode: parse legacy positional or name-value args ---
 normalizeRaw = false;
 stripExtraRawChannels = false;
-if ~isempty(varargin)
-    % Legacy positional: asSNIRF(data, path, true, false)
-    if islogical(varargin{1}) || isnumeric(varargin{1})
-        normalizeRaw = varargin{1};
-        if numel(varargin) >= 2
-            stripExtraRawChannels = varargin{2};
-        end
+args = varargin;
+% Legacy positional: asSNIRF(data, path, true, false)
+if ~isempty(args) && (islogical(args{1}) || isnumeric(args{1}))
+    normalizeRaw = args{1};
+    args(1) = [];
+    if ~isempty(args) && (islogical(args{1}) || isnumeric(args{1}))
+        stripExtraRawChannels = args{1};
+        args(1) = [];
     end
 end
+p = inputParser;
+p.KeepUnmatched = true;
+p.addParameter('NormalizeRaw', normalizeRaw, @(x) islogical(x) || isnumeric(x));
+p.addParameter('StripExtraRawChannels', stripExtraRawChannels, @(x) islogical(x) || isnumeric(x));
+p.addParameter('TimeZone', '', @(x) ischar(x) || isstring(x));
+p.parse(args{:});
+normalizeRaw = p.Results.NormalizeRaw;
+stripExtraRawChannels = p.Results.StripExtraRawChannels;
+timeZone = char(p.Results.TimeZone);
 
 [ filepathdir, filename, ext ] = fileparts(filepath);
 
@@ -174,7 +199,7 @@ for n = 1:numNIRS
     curNIRdata = [];
 
     % Convert info to metadata with enhanced field mapping
-    metaDataTags = info2meta(curStruct);
+    metaDataTags = info2meta(curStruct, timeZone);
 
     % Build probe structure and measurement list
     [probe, measurementList, probeMetaData, rawMax, forceStrippedChannelsMask] = buildProbe(curStruct);
@@ -292,6 +317,11 @@ for n = 1:numNIRS
             labelVar = '';
             for v = 1:numel(extraVars)
                 col = mt.(extraVars{v});
+                if strcmp(extraVars{v}, 'Amplitude') && isnumeric(col) && all(col == 1)
+                    % Default amplitude (normalizeMarkers fill); importSNIRF
+                    % restores it, so it adds a column without information
+                    continue;
+                end
                 if isnumeric(col) || islogical(col)
                     numericExtra{end+1} = extraVars{v}; %#ok<AGROW>
                 elseif isempty(labelVar) && (isstring(col) || iscellstr(col) || iscategorical(col))
@@ -331,7 +361,9 @@ for n = 1:numNIRS
                     stimLabels{end+1} = numericExtra{v}; %#ok<AGROW>
                 end
                 if numel(stimLabels) > 3
-                    stimItem.dataLabels = stimLabels;
+                    % String array -> one 1-D dataLabels dataset (SNIRF spec);
+                    % a cell array would be split into dataLabels1..N
+                    stimItem.dataLabels = string(stimLabels);
                 end
 
                 if m == 1
@@ -365,9 +397,9 @@ for n = 1:numNIRS
                             stimLabels{end+1} = sprintf('column%d', col);
                         end
                     end
-                    stimItem.dataLabels = stimLabels;
+                    stimItem.dataLabels = string(stimLabels);
                 end
-                
+
                 if m == 1
                     stim = stimItem;
                 else
@@ -497,6 +529,32 @@ function name = dictLabel(dictTbl, code, fallback)
     end
 end
 
+function [dt, hasClock] = toDatetime(val)
+    % TODATETIME Parse a datetime or ISO-style date/time string; [] if not parseable
+    dt = [];
+    hasClock = false;
+    if isdatetime(val)
+        if ~isempty(val) && ~isnat(val(1))
+            dt = val(1);
+            hasClock = true;
+        end
+        return;
+    end
+    if ~(ischar(val) || isstring(val)), return; end
+    str = strtrim(char(val));
+    fmts = {'yyyy-MM-dd''T''HH:mm:ss.SSS', 'yyyy-MM-dd''T''HH:mm:ss', ...
+        'yyyy-MM-dd HH:mm:ss.SSSSSS', 'yyyy-MM-dd HH:mm:ss.SSS', 'yyyy-MM-dd HH:mm:ss', 'yyyy-MM-dd'};
+    for k = 1:numel(fmts)
+        try
+            dt = datetime(str, 'InputFormat', fmts{k});
+            hasClock = k < numel(fmts);
+            return;
+        catch
+        end
+    end
+    dt = [];
+end
+
 function charOut = c2v(str)
     % Ensure consistent string format for HDF5 compatibility
     % This creates a variable-length string that works with Python's h5py
@@ -510,8 +568,9 @@ function charOut = c2v(str)
     charOut = char(str);
 end
 
-function metaData = info2meta(nirStruct)
+function metaData = info2meta(nirStruct, timeZone)
     % Enhanced metadata conversion with support for all requested fields
+    if nargin < 2, timeZone = ''; end
     
     metaData = [];
     
@@ -526,48 +585,63 @@ function metaData = info2meta(nirStruct)
     end
     
     info = nirStruct.info;
-    
-    % Handle acquisition time metadata
-    if isfield(nirStruct, 't0') && ~isempty(nirStruct.t0)
-        % ISO 8601 formatted date
-        try
-            metaData.MeasurementDate = c2v(sprintf('%i-%02d-%02d', year(nirStruct.t0), month(nirStruct.t0), day(nirStruct.t0)));
-            
-            % ISO 8601 formatted time with milliseconds
-            ms = floor(rem(second(nirStruct.t0), 1) * 1000);
-            if ~isempty(nirStruct.t0.TimeZone)
-                metaData.MeasurementTimeZone = c2v(nirStruct.t0.TimeZone);
-                tzd = '';  % Timezone already included in t0
-            else
-                tzd = '';
+
+    % Date/time tags are only written from a parsed datetime (ISO 8601);
+    % free-text info fields never overwrite them
+    t0Tags = {'MeasurementDate', 'MeasurementTime', 'MeasurementTimeZone', ...
+        'AcquisitionStartTime', 'UnixTime'};
+
+    % Recording start: t0, else a date/time held in info
+    t0 = [];
+    hasClock = true;
+    if isfield(nirStruct, 't0') && isdatetime(nirStruct.t0) && ~isempty(nirStruct.t0) && ~isnat(nirStruct.t0)
+        t0 = nirStruct.t0;
+    else
+        dateFields = {'StartDateTime', 'MeasurementDate', 'date', 'Date', 'recordingDate'};
+        for k = 1:numel(dateFields)
+            if isfield(info, dateFields{k}) && ~isempty(info.(dateFields{k}))
+                [t0, hasClock] = toDatetime(info.(dateFields{k}));
+                if ~isempty(t0), break; end
             end
-            
-            metaData.MeasurementTime = c2v(sprintf('%02d:%02d:%02d.%03d%s', hour(nirStruct.t0), minute(nirStruct.t0), floor(second(nirStruct.t0)), ms, tzd));
-            
-            % Add Unix timestamps for easier cross-platform time handling
-            metaData.AcquisitionStartTime = c2v(num2str(posixtime(nirStruct.t0 + seconds(min(nirStruct.time)))));
-            metaData.UnixTime = c2v(num2str(posixtime(nirStruct.t0)));
-        catch
-            warning('Error processing t0 datetime. Using default values.');
+        end
+        if isempty(t0) && isfield(info, 'UnixTime') && ~isempty(info.UnixTime)
+            ut = info.UnixTime;
+            if ischar(ut) || isstring(ut), ut = str2double(ut); end
+            if isfinite(ut)
+                t0 = datetime(ut, 'ConvertFrom', 'posixtime', 'TimeZone', 'UTC');
+                hasClock = true;
+            end
         end
     end
 
-    % Fallback: if MeasurementDate not set yet, try info fields or UnixTime
-    if ~isfield(metaData, 'MeasurementDate')
-        if isfield(info, 'MeasurementDate') && ~isempty(info.MeasurementDate)
-            metaData.MeasurementDate = c2v(info.MeasurementDate);
-        elseif isfield(info, 'date') && ~isempty(info.date)
-            metaData.MeasurementDate = c2v(info.date);
-        elseif isfield(info, 'Date') && ~isempty(info.Date)
-            metaData.MeasurementDate = c2v(info.Date);
-        elseif isfield(info, 'recordingDate') && ~isempty(info.recordingDate)
-            metaData.MeasurementDate = c2v(info.recordingDate);
-        elseif isfield(info, 'UnixTime') && ~isempty(info.UnixTime)
-            ut = info.UnixTime;
-            if ischar(ut) || isstring(ut), ut = str2double(ut); end
-            dt = datetime(ut, 'ConvertFrom', 'posixtime');
-            metaData.MeasurementDate = c2v(datestr(dt, 'yyyy-mm-dd'));
-            metaData.MeasurementTime = c2v(datestr(dt, 'HH:MM:SS'));
+    if ~isempty(t0)
+        % A t0 without a zone is the device's wall-clock time. Its zone comes
+        % from the TimeZone option; it is never taken from this machine.
+        if isempty(t0.TimeZone) && ~isempty(timeZone)
+            try
+                t0.TimeZone = timeZone;
+            catch e
+                error('pf2:asSNIRF:badTimeZone', 'Invalid TimeZone ''%s'': %s', timeZone, e.message);
+            end
+        end
+        metaData.MeasurementDate = c2v(char(datetime(t0, 'Format', 'yyyy-MM-dd')));
+        if hasClock
+            if isempty(t0.TimeZone)
+                metaData.MeasurementTime = c2v(char(datetime(t0, 'Format', 'HH:mm:ss.SSS')));
+                warning('pf2:asSNIRF:noTimeZone', ...
+                    ['Recording start time has no time zone; MeasurementTime is written ' ...
+                     'without a UTC offset and UnixTime is omitted. Pass ''TimeZone'' ' ...
+                     '(e.g. ''America/New_York'') to write absolute times.']);
+            else
+                metaData.MeasurementTime = c2v(char(datetime(t0, 'Format', 'HH:mm:ss.SSSxxx')));
+                metaData.MeasurementTimeZone = c2v(t0.TimeZone);
+                tStart = 0;
+                if isfield(nirStruct, 'time') && ~isempty(nirStruct.time)
+                    tStart = min(nirStruct.time);
+                end
+                metaData.AcquisitionStartTime = c2v(sprintf('%.3f', posixtime(t0 + seconds(tStart))));
+                metaData.UnixTime = c2v(sprintf('%.3f', posixtime(t0)));
+            end
         end
     end
 
@@ -646,7 +720,10 @@ function metaData = info2meta(nirStruct)
         if isKey(fieldMappings, lower(fieldName))
             mappedName = fieldMappings(lower(fieldName));
         end
-        
+        if ismember(mappedName, t0Tags) || ismember(fieldName, t0Tags) || strcmp(fieldName, 'StartDateTime')
+            continue;
+        end
+
         % Process field value based on type
         if (isstring(fieldValue) || ischar(fieldValue)) && ~isempty(fieldValue)
             if ~isempty(mappedName)
@@ -764,6 +841,10 @@ function [probe, measurementList, deviceMetaDataTags, rawMax, strippedChannelsMa
         deviceMetaDataTags.RawMax = c2v(num2str(deviceInfoFields.RawMax));
         rawMax = deviceInfoFields.RawMax;
     end
+    % Positions are written as stored, so declare the device's unit
+    if isfield(deviceInfoFields, 'CoordinateUnits') && ~isempty(deviceInfoFields.CoordinateUnits)
+        deviceMetaDataTags.LengthUnit = c2v(deviceInfoFields.CoordinateUnits);
+    end
 
     % Initialize measurement list
     tableCh = probeStruct.TableCh;
@@ -776,12 +857,11 @@ function [probe, measurementList, deviceMetaDataTags, rawMax, strippedChannelsMa
         [wvList, ~, wvI] = unique(tableCh.Wavelength);
     end
     
-    % Handle dark channels
-    if ~any(wvList == 0)
+    % Handle dark channels (add a 0 nm entry only when a dark channel needs it)
+    darkIdx = find(wvList == 0, 1);
+    if isempty(darkIdx) && any(tableCh.isDark)
         wvList(end+1) = 0;
         darkIdx = length(wvList);
-    else
-        darkIdx = find(wvList == 0);
     end
 
     invalidWv = isnan(wvI);
@@ -932,6 +1012,7 @@ function opts = parseBatchOpts(varargin)
     p.addParameter('NormalizeRaw', false, @(x) islogical(x) || isnumeric(x));
     p.addParameter('StripExtraRawChannels', false, @islogical);
     p.addParameter('Verbose', true, @islogical);
+    p.addParameter('TimeZone', '', @(x) ischar(x) || isstring(x));
     p.parse(varargin{:});
     opts = p.Results;
 end

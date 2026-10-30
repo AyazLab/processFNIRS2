@@ -60,6 +60,7 @@ if(~isempty(outfile))
         data.nirs=forceindex(data.nirs,'stim');
         data.nirs=forceindex(data.nirs,'aux');
         opt.VariableLengthString=true;
+        opt.Force1D={'wavelengths','wavelengthsEmission','time'}; % pf2: 1-D per SNIRF spec
         saveh5(data,outfile,opt);
     elseif(~isempty(regexp(outfile,'\.[Jj][Nn][Ii][Rr][Ss]$', 'once'))|| ~isempty(regexp(outfile,'\.[Jj][Ss][Oo][Nn]$', 'once')))
         savejson('SNIRDData',data,'FileName',outfile,opt);

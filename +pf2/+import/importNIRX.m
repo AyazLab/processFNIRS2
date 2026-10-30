@@ -56,7 +56,16 @@ function [fNIR] = importNIRX(folderDIR,channelCheck,varargin)
 % Notes:
 %   - Supports NIRSport and NIRScout systems
 %   - Automatically detects short-separation channels (SD < 2cm)
-%   - Spatial units in .nirs files are converted from mm to cm
+%   - Optode positions are stored in mm (converted from the .nirs SpatialUnit);
+%     source-detector distances are stored in cm
+%   - Recording start (.t0) and device model are read from the .hdr GeneralInfo
+%     (Device, or else Device ID mapped to the model name). t0 has no time
+%     zone; pass 'TimeZone' to pf2.export.asSNIRF to write absolute times.
+%   - 3D optode positions are kept as recorded; the 2D layout is a top view
+%     (anterior up, right on the right): the planar positions when the
+%     montage is flat, otherwise a projection of the 3D positions about the
+%     vertex
+%   - All-zero aux columns (no aux input connected) are dropped
 %   - Subject demographics read from _description.json if available
 %   - Changes working directory during import, then restores original
 %
@@ -201,13 +210,30 @@ for i=1:size(files,1)
             [~,sortIdx]=sort(mrk(:,1));
             fNIR.markers=mrk(sortIdx,:);
             fNIR.markers = pf2_base.normalizeMarkers(fNIR.markers);
-            fNIR.Aux.NIRx=probeInfo.aux;
+        end
+        % Keep only aux columns that were recorded (NIRStar writes an
+        % all-zero column when no aux input is connected)
+        if(isfield(probeInfo,'aux')&&~isempty(probeInfo.aux))
+            auxData=probeInfo.aux(:,any(probeInfo.aux~=0,1));
+            if(~isempty(auxData))
+                fNIR.Aux.NIRx=auxData;
+            end
         end
         
-        if(strcmp(probeInfo.SD.SpatialUnit,'mm'))
-            probeInfo.SD.SrcPos=probeInfo.SD.SrcPos/10;
-            probeInfo.SD.DetPos=probeInfo.SD.DetPos/10;
+        % Keep optode positions in mm, the toolbox-wide coordinate unit
+        % (loadDeviceCfg, importSNIRF); SD distances below are stored in cm.
+        posScale=1;
+        if(isfield(probeInfo.SD,'SpatialUnit'))
+            switch(lower(strtrim(probeInfo.SD.SpatialUnit)))
+                case 'cm'
+                    posScale=10;
+                case 'm'
+                    posScale=1000;
+            end
         end
+        probeInfo.SD.SrcPos=probeInfo.SD.SrcPos*posScale;
+        probeInfo.SD.DetPos=probeInfo.SD.DetPos*posScale;
+        [srcPos2D,detPos2D]=layout2D(probeInfo.SD.SrcPos,probeInfo.SD.DetPos);
         
         probeNums=unique(probeInfo.SD.MeasList(:,3)); % I THINK
         
@@ -223,10 +249,10 @@ for i=1:size(files,1)
         device.cfg=pf2_base.external.INI();
         device.Info.CfgName='generated NIRX file';
         
-        device.Info.Name='Sport';
-        device.Info.Manufacturer='NIRX';
-        device.Info.DefaultSamplingRate=7.8125;
-        device.Info.MaxSamplingRate=7.8125;
+        % Name and sampling rate are filled from the .hdr after all files are read
+        device.Info.Name='NIRx';
+        device.Info.Manufacturer='NIRx';
+        device.Info.CoordinateUnits='mm';
         device.Info.NumberProbes=length(probeNums);
         device.Info.RawMax=1;
         device.Info.RawMin=0;
@@ -242,12 +268,13 @@ for i=1:size(files,1)
             
             
             
-            device.Probe{p}.SrcPosX=probeInfo.SD.SrcPos(:,1);
-            device.Probe{p}.SrcPosY=probeInfo.SD.SrcPos(:,2);
-            device.Probe{p}.SrcPosZ=probeInfo.SD.SrcPos(:,3);
-            device.Probe{p}.DetPosX=probeInfo.SD.DetPos(:,1);
-            device.Probe{p}.DetPosY=probeInfo.SD.DetPos(:,2);
-            device.Probe{p}.DetPosZ=probeInfo.SD.DetPos(:,3);
+            % SrcPos*/DetPos* X/Y/Z hold the 2D layout (Z=0); 3D stays in *Pos3D
+            device.Probe{p}.SrcPosX=srcPos2D(:,1);
+            device.Probe{p}.SrcPosY=srcPos2D(:,2);
+            device.Probe{p}.SrcPosZ=zeros(size(srcPos2D,1),1);
+            device.Probe{p}.DetPosX=detPos2D(:,1);
+            device.Probe{p}.DetPosY=detPos2D(:,2);
+            device.Probe{p}.DetPosZ=zeros(size(detPos2D,1),1);
             
             
             device.Probe{p}.SrcPos3D=probeInfo.SD.SrcPos;
@@ -284,18 +311,18 @@ for i=1:size(files,1)
             device.Probe{p}.SrcPos.x_2d=device.Probe{p}.SrcPosX(:);
             device.Probe{p}.SrcPos.y_2d=device.Probe{p}.SrcPosY(:);
             device.Probe{p}.SrcPos.z_2d=device.Probe{p}.SrcPosZ(:);
-            device.Probe{p}.SrcPos.x=device.Probe{p}.SrcPosX(:);
-            device.Probe{p}.SrcPos.y=device.Probe{p}.SrcPosY(:);
-            device.Probe{p}.SrcPos.z=device.Probe{p}.SrcPosZ(:);
+            device.Probe{p}.SrcPos.x=probeInfo.SD.SrcPos(:,1);
+            device.Probe{p}.SrcPos.y=probeInfo.SD.SrcPos(:,2);
+            device.Probe{p}.SrcPos.z=probeInfo.SD.SrcPos(:,3);
             
             
             device.Probe{p}.DetPos=table();
             device.Probe{p}.DetPos.x_2d=device.Probe{p}.DetPosX(:);
             device.Probe{p}.DetPos.y_2d=device.Probe{p}.DetPosY(:);
             device.Probe{p}.DetPos.z_2d=device.Probe{p}.DetPosZ(:);
-            device.Probe{p}.DetPos.x=device.Probe{p}.DetPosX(:);
-            device.Probe{p}.DetPos.y=device.Probe{p}.DetPosY(:);
-            device.Probe{p}.DetPos.z=device.Probe{p}.DetPosZ(:);
+            device.Probe{p}.DetPos.x=probeInfo.SD.DetPos(:,1);
+            device.Probe{p}.DetPos.y=probeInfo.SD.DetPos(:,2);
+            device.Probe{p}.DetPos.z=probeInfo.SD.DetPos(:,3);
             
           
             
@@ -337,17 +364,15 @@ for i=1:size(files,1)
             device.Probe{p}.OptPos.x_2d=device.Probe{p}.OptPosX(:);
             device.Probe{p}.OptPos.y_2d=device.Probe{p}.OptPosY(:);
             device.Probe{p}.OptPos.z_2d=device.Probe{p}.OptPosZ(:);
-            device.Probe{p}.OptPos.x=device.Probe{p}.OptPosX(:);
-            device.Probe{p}.OptPos.y=device.Probe{p}.OptPosY(:);
-            device.Probe{p}.OptPos.z=device.Probe{p}.OptPosZ(:);
-            
             device.Probe{p}.DetPos3D=detPos3D;
             device.Probe{p}.SrcPos3D=srcPos3D;
             
             device.Probe{p}.OptPos3D=(srcPos3D+detPos3D)/2;
+            device.Probe{p}.OptPos.x=device.Probe{p}.OptPos3D(:,1);
+            device.Probe{p}.OptPos.y=device.Probe{p}.OptPos3D(:,2);
+            device.Probe{p}.OptPos.z=device.Probe{p}.OptPos3D(:,3);
             
-            device.Probe{p}.SD=sqrt((device.Probe{p}.SrcPosX-device.Probe{p}.DetPosX).^2+...
-                (device.Probe{p}.SrcPosY-device.Probe{p}.DetPosY).^2+(device.Probe{p}.SrcPosZ-device.Probe{p}.DetPosZ).^2)';
+            device.Probe{p}.SD=sqrt(sum((srcPos3D-detPos3D).^2,2))'/10; % mm -> cm
             device.Probe{p}.IsShortSeparation=device.Probe{p}.SD<2;
             
             numCh=size(uPairs,1);
@@ -356,7 +381,7 @@ for i=1:size(files,1)
             device.Probe{p}.wvI=probeInfo.SD.MeasList(curProbeIdx,4);
             device.Probe{p}.ChannelNumbers=uPairIdx';
             device.Probe{p}.ChannelList= 1:numCh;
-            device.Probe{p}.Wavelength=probeInfo.SD.Lambda(device.Probe{p}.wvI);
+            device.Probe{p}.Wavelength=probeInfo.SD.Lambda(:)'; % unique list, indexed by wvI
             device.Info.NumberChannels=device.Info.NumberChannels+numCh;
 
             % Assemble the canonical per-channel optode table from the geometry
@@ -373,11 +398,11 @@ for i=1:size(files,1)
             if(buildProbeLayout) % auto generate plot layour
                 if(isfield(device.Probe{p},'OptPosX')&&isfield(device.Probe{p},'OptPosY'))
                     if(includeSSchannels)
-                        device.Probe{p}.OptLayout2D_ss=pf2_base.fitProbe2D(device.Probe{p}.OptPosX,device.Probe{p}.OptPosY,device.Probe{p}.OptPosZ);
+                        device.Probe{p}.OptLayout2D_ss=pf2_base.fitProbe2D(device.Probe{p}.OptPosX,device.Probe{p}.OptPosY,device.Probe{p}.OptPosZ,false);
                     end
                         device.Probe{p}.OptLayout2D=pf2_base.fitProbe2D(device.Probe{p}.OptPosX(~device.Probe{p}.IsShortSeparation)...
                             ,device.Probe{p}.OptPosY(~device.Probe{p}.IsShortSeparation),...
-                            device.Probe{p}.OptPosZ(~device.Probe{p}.IsShortSeparation));
+                            device.Probe{p}.OptPosZ(~device.Probe{p}.IsShortSeparation),false);
                     
                 else
                     warning('buildProbeLayout option selected, but not enough information to generate Optode locations');
@@ -408,7 +433,7 @@ for i=1:size(files,1)
         fNIR.info.probeInfo.read();
         pInfo=fNIR.info.probeInfo;
         
-        if(ismember('Markers',fieldnames(pInfo))&&isfield(pInfo.Markers,'Events'))
+        if(isprop(pInfo,'Markers')&&isfield(pInfo.Markers,'Events'))
             NIRX_mrk=strsplit(pInfo.Markers.Events,'\n');
             numL=0;
             for l=1:length(NIRX_mrk)
@@ -423,19 +448,19 @@ for i=1:size(files,1)
             end
         end
         
-        if(ismember('ImagingParameters',fieldnames(pInfo))&&isfield(pInfo.ImagingParameters,'SamplingRate'))
+        if(isprop(pInfo,'ImagingParameters')&&isfield(pInfo.ImagingParameters,'SamplingRate'))
             fNIR.fs=pInfo.ImagingParameters.SamplingRate;
             fNIR.info.SamplingRate=fNIR.fs;
         end
         
-        if(ismember('ImagingParameters',fieldnames(pInfo))&&isfield(pInfo.ImagingParameters,'Wavelengths'))
+        if(isprop(pInfo,'ImagingParameters')&&isfield(pInfo.ImagingParameters,'Wavelengths'))
             s=pInfo.ImagingParameters.Wavelengths;
             s(s==''''|s=='"')=[];
             s=strsplit(s,'\t');
             fNIR.info.curWv=str2double(s);
         end
         
-        if(ismember('DataStructure',fieldnames(pInfo))&&isfield(pInfo.DataStructure,'S_D_Key'))
+        if(isprop(pInfo,'DataStructure')&&isfield(pInfo.DataStructure,'S_D_Key'))
             s=pInfo.DataStructure.S_D_Key;
             s(s==''''|s=='"')=[];
             sdkeyLines=strsplit(s,',');
@@ -444,7 +469,7 @@ for i=1:size(files,1)
             end
         end
         
-        if(ismember('DataStructure',fieldnames(pInfo))&&isfield(pInfo.DataStructure,'S_D_Mask'))
+        if(isprop(pInfo,'DataStructure')&&isfield(pInfo.DataStructure,'S_D_Mask'))
             s=pInfo.DataStructure.S_D_Mask;
             s(s==''''|s=='"')=[];
             sdmaskLines=strsplit(s,'\n');
@@ -458,29 +483,35 @@ for i=1:size(files,1)
             end
         end
         
-        if(ismember('ChannelsDistance',fieldnames(pInfo))&&isfield(pInfo.ChannelsDistance,'ChanDis'))
+        if(isprop(pInfo,'ChannelsDistance')&&isfield(pInfo.ChannelsDistance,'ChanDis'))
             s=pInfo.ChannelsDistance.ChanDis;
             s(s==''''|s=='"')=[];
             splitLine=strsplit(s,'\t');
             fNIR.info.ChanDis=str2double(splitLine)/10; %convert to cm
         end
         
-        if(ismember('GeneralInfo',fieldnames(pInfo))&&isfield(pInfo.GeneralInfo,'Subject'))
+        if(isprop(pInfo,'GeneralInfo')&&isfield(pInfo.GeneralInfo,'Subject'))
             fNIR.info.SubjectID=pInfo.GeneralInfo.Subject;
         end
         
-        if(ismember('GeneralInfo',fieldnames(pInfo))&&isfield(pInfo.GeneralInfo,'FileName'))
+        if(isprop(pInfo,'GeneralInfo')&&isfield(pInfo.GeneralInfo,'FileName'))
             fNIR.info.Filename=pInfo.GeneralInfo.FileName;
         end
         
-        if(ismember('GeneralInfo',fieldnames(pInfo))&&isfield(pInfo.GeneralInfo,'Date'))
-            fNIR.info.Date=pInfo.GeneralInfo.Date;
-            fNIR.info.StartDateTime=datetime(pInfo.GeneralInfo.Date);
+        if(isprop(pInfo,'GeneralInfo')&&isfield(pInfo.GeneralInfo,'Date'))
+            fNIR.info.Date=stripQuotes(pInfo.GeneralInfo.Date);
         end
-        
-        if(ismember('GeneralInfo',fieldnames(pInfo))&&isfield(pInfo.GeneralInfo,'Time'))
-            fNIR.info.Time=pInfo.GeneralInfo.Time;
-            %fNIR.info.StartDateTime=pInfo.GeneralInfo.Time;
+
+        if(isprop(pInfo,'GeneralInfo')&&isfield(pInfo.GeneralInfo,'Time'))
+            fNIR.info.Time=stripQuotes(pInfo.GeneralInfo.Time);
+        end
+
+        if(isprop(pInfo,'GeneralInfo')&&isfield(pInfo.GeneralInfo,'Device'))
+            fNIR.info.Device=stripQuotes(pInfo.GeneralInfo.Device);
+        end
+
+        if(isprop(pInfo,'GeneralInfo')&&isfield(pInfo.GeneralInfo,'Device_ID'))
+            fNIR.info.DeviceID=stripQuotes(pInfo.GeneralInfo.Device_ID);
         end
     end
     
@@ -579,6 +610,38 @@ end
 
 fNIR.fchMask=ones(1,numCh);
 
+% Recording start from the .hdr Date/Time (local wall-clock time, no zone)
+if(isfield(fNIR,'info')&&isfield(fNIR.info,'Date'))
+    hdrTime='';
+    if(isfield(fNIR.info,'Time'))
+        hdrTime=fNIR.info.Time;
+    end
+    t0=parseHdrDateTime(fNIR.info.Date,hdrTime);
+    if(~isempty(t0))
+        fNIR.t0=t0;
+        fNIR.info.StartDateTime=t0;
+    else
+        warning('pf2:importNIRX:unparsedStartTime', ...
+            'Could not parse .hdr Date/Time ''%s %s''; recording start time not set.', ...
+            fNIR.info.Date,hdrTime);
+    end
+end
+
+% Device model and sampling rate from the .hdr
+if(isstruct(device)&&isfield(device,'Info'))
+    if(isfield(fNIR,'info')&&isfield(fNIR.info,'Device')&&~isempty(fNIR.info.Device))
+        device.Info.Name=fNIR.info.Device;
+    elseif(isfield(fNIR,'info')&&isfield(fNIR.info,'DeviceID')&&~isempty(fNIR.info.DeviceID))
+        model=modelFromDeviceID(fNIR.info.DeviceID);
+        if(~isempty(model))
+            device.Info.Name=model;
+        end
+    end
+    if(isfield(fNIR,'fs')&&~isempty(fNIR.fs))
+        device.Info.DefaultSamplingRate=fNIR.fs;
+        device.Info.MaxSamplingRate=fNIR.fs;
+    end
+end
 
 fNIR.probeinfo=device;
 
@@ -634,6 +697,111 @@ end
 % cd restored automatically by cdCleanup
 end
 
+
+
+function s=stripQuotes(s)
+% Remove the surrounding quotes NIRx writes around .hdr string values
+if(isnumeric(s))
+    s=num2str(s);
+end
+s=strtrim(char(string(s)));
+s(s=='"'|s=='''')=[];
+s=strtrim(s);
+end
+
+
+function t0=parseHdrDateTime(dateStr,timeStr)
+% Parse the .hdr GeneralInfo Date and Time into a datetime (no time zone).
+% NIRStar and Aurora write several date layouts depending on version/locale;
+% some write the full timestamp in Date (yyyy-MM-dd HH:mm:ss.SSSSSS).
+t0=[];
+dateTimeFmts={'yyyy-MM-dd HH:mm:ss.SSSSSS','yyyy-MM-dd HH:mm:ss.SSS','yyyy-MM-dd HH:mm:ss'};
+for f=1:numel(dateTimeFmts)
+    try
+        t0=datetime(dateStr,'InputFormat',dateTimeFmts{f},'Locale','en_US');
+        t0.Format='yyyy-MM-dd HH:mm:ss.SSS';
+        return;
+    catch
+    end
+end
+dateFmts={'eee, MMM dd, yyyy','eee, dd MMM yyyy','eee dd MMM yyyy','eee, MMMM dd, yyyy', ...
+    'yyyy-MM-dd','dd.MM.yyyy','MM/dd/yyyy','dd MMM yyyy'};
+timeFmts={'HH:mm:ss.SSS','HH:mm:ss','hh:mm:ss.SSS a','hh:mm:ss a','HH:mm'};
+if(isempty(timeStr))
+    timeFmts={''};
+end
+str=strtrim(sprintf('%s %s',dateStr,timeStr));
+for d=1:numel(dateFmts)
+    for t=1:numel(timeFmts)
+        fmt=strtrim(sprintf('%s %s',dateFmts{d},timeFmts{t}));
+        try
+            t0=datetime(str,'InputFormat',fmt,'Locale','en_US');
+            t0.Format='yyyy-MM-dd HH:mm:ss.SSS';
+            return;
+        catch
+        end
+    end
+end
+t0=[];
+end
+
+
+function model=modelFromDeviceID(deviceID)
+% Map a .hdr Device ID to the NIRx device model; empty when unrecognized
+model='';
+patterns={'nirsport\s*-?\s*2|^nsp2','NIRSport2'; 'nirscout\s*-?\s*x','NIRScoutX'; ...
+    'nirscout','NIRScout'; 'nirsport|^nsp','NIRSport'};
+for k=1:size(patterns,1)
+    if(~isempty(regexpi(deviceID,patterns{k,1},'once')))
+        model=patterns{k,2};
+        return;
+    end
+end
+end
+
+
+function [src2D,det2D]=layout2D(srcPos,detPos)
+% 2D optode layout in the units of the 3D positions, as a top view (anterior
+% up, the subject's right on the right). Positions that are already planar
+% (a NIRStar 2D montage) are used as they are. Positions on a surface around
+% the origin (head coordinates, z superior) are flattened with an azimuthal
+% equidistant projection about the vertex, which keeps distances from the
+% vertex. Other 3D positions are projected onto their best-fit plane, with
+% axes aligned to x and y.
+P=[srcPos;detPos];
+nSrc=size(srcPos,1);
+if(size(P,2)<3)
+    P(:,3)=0;
+end
+rng=max(P,[],1)-min(P,[],1);
+r=sqrt(sum(P.^2,2));
+if(rng(3)<=1e-6*max([rng(1:2),1]))
+    XY=P(:,1:2);
+elseif(all(r>0)&&std(r)/mean(r)<0.2)
+    d=P./r;
+    theta=acos(max(-1,min(1,d(:,3))));
+    phi=atan2(d(:,2),d(:,1));
+    XY=mean(r)*theta.*[cos(phi),sin(phi)];
+else
+    c=mean(P,1);
+    [V,D]=eig(cov(P-c));
+    [~,iMin]=min(diag(D));
+    n=V(:,iMin)';
+    e1=[1 0 0]-dot([1 0 0],n)*n;
+    if(norm(e1)<0.3)
+        e1=[0 1 0]-dot([0 1 0],n)*n;
+    end
+    e1=e1/norm(e1);
+    e2=[0 1 0]-dot([0 1 0],n)*n-dot([0 1 0],e1)*e1;
+    if(norm(e2)<0.3)
+        e2=[0 0 1]-dot([0 0 1],n)*n-dot([0 0 1],e1)*e1;
+    end
+    e2=e2/norm(e2);
+    XY=[(P-c)*e1',(P-c)*e2'];
+end
+src2D=XY(1:nSrc,:);
+det2D=XY(nSrc+1:end,:);
+end
 
 
 function opt_2d_coords=setUpFalse2D(numCh)

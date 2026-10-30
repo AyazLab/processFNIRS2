@@ -90,6 +90,7 @@ opt.compressarraysize = jsonopt('CompressArraySize', 100, opt);
 opt.unpackhex = jsonopt('UnpackHex', 1, opt);
 opt.dotranspose = jsonopt('Transpose', 1, opt);
 opt.variablelengthstring = jsonopt('VariableLengthString', 0, opt);
+opt.force1d = jsonopt('Force1D', {}, opt); % pf2: dataset names written as 1-D when vectors
 opt.scalar = jsonopt('Scalar', 1, opt);
 
 opt.releaseid = 0;
@@ -260,6 +261,10 @@ if (isa(item, 'timeseries'))
     end
 end
 
+if (isfield(opt, 'force1d') && ~isempty(opt.force1d) && isnumeric(item) && isvector(item) && ismember(name, opt.force1d))
+    is1dvector = 1;
+end
+
 if (opt.dotranspose)
     item = permute(item, ndims(item):-1:1);
 end
@@ -320,7 +325,8 @@ if (isreal(item) || isa(item, 'string'))
         if ((ischar(item) || isa(item, 'string')) && opt.variablelengthstring)
             H5T.set_size(itemtype, 'H5T_VARIABLE');
             itemsize = H5S.create('H5S_SCALAR');
-            if (isa(item, 'string') && is1dvector)
+            if (isa(item, 'string') && (is1dvector || (isvector(item) && numel(item) > 1)))
+                % pf2: string vectors are written as 1-D datasets (e.g. SNIRF dataLabels)
                 itemsize = H5S.create_simple(1, length(item), length(item));
             elseif (isa(item, 'string') && length(item) > 1)
                 itemsize = H5S.create_simple(ndims(item), fliplr(size(item)), fliplr(size(item)));
