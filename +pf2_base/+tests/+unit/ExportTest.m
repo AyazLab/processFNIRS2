@@ -546,6 +546,50 @@ classdef ExportTest < matlab.unittest.TestCase
             testCase.verifyFalse(ismember('MeasurementDate', {info.Datasets.Name}));
         end
 
+        function testExportSNIRFMeasurementListTypes(testCase)
+            % Index and type fields are integers; no dataTypeLabel or
+            % dataUnit for raw data (MNE >= 1.13 rejects dataUnit 'au')
+            filepath = testCase.createTempPath('.snirf');
+            pf2.export.asSNIRF(testCase.RawData, filepath, 'TimeZone', 'UTC');
+
+            ml = h5info(filepath, '/nirs/data1/measurementList1');
+            names = {ml.Datasets.Name};
+            testCase.verifyFalse(any(ismember({'dataTypeLabel', 'dataUnit'}, names)));
+            for f = {'dataType', 'dataTypeIndex', 'sourceIndex', 'detectorIndex', 'wavelengthIndex'}
+                v = h5read(filepath, ['/nirs/data1/measurementList1/' f{1}]);
+                testCase.verifyClass(v, 'int32', [f{1} ' should be stored as an integer']);
+            end
+
+            % Reimport reads the integers back as doubles
+            reimported = pf2.import.importSNIRF(filepath, false);
+            testCase.verifyEqual(size(reimported.raw, 1), size(testCase.RawData.raw, 1));
+            testCase.verifyClass(reimported.probeinfo.Probe{1}.TableCh.SourceIndex, 'double');
+        end
+
+        function testExportSNIRFOmitsIdentifyingMetadata(testCase)
+            % Identifying .info fields are written only with
+            % IncludeIdentifying; paths are reduced to the file name
+            data = testCase.RawData;
+            data.info.Age = 59;
+            data.info.sex = 'F';
+            data.info.Experimenter = 'AB';
+            data.info.filename = '/Users/someone/study/raw/subject01.nir';
+            data.info.Group = 'Control';
+            filepath = testCase.createTempPath('.snirf');
+            pf2.export.asSNIRF(data, filepath, 'TimeZone', 'UTC');
+
+            tags = {h5info(filepath, '/nirs/metaDataTags').Datasets.Name};
+            testCase.verifyFalse(any(ismember({'Age', 'sex', 'Experimenter'}, tags)));
+            testCase.verifyEqual(char(h5read(filepath, '/nirs/metaDataTags/filename')), 'subject01.nir');
+            testCase.verifyEqual(char(h5read(filepath, '/nirs/metaDataTags/Group')), 'Control');
+
+            filepath2 = testCase.createTempPath('.snirf');
+            pf2.export.asSNIRF(data, filepath2, 'TimeZone', 'UTC', 'IncludeIdentifying', true);
+            tags = {h5info(filepath2, '/nirs/metaDataTags').Datasets.Name};
+            testCase.verifyTrue(all(ismember({'Age', 'sex', 'Experimenter'}, tags)));
+            testCase.verifyEqual(char(h5read(filepath2, '/nirs/metaDataTags/filename')), 'subject01.nir');
+        end
+
         function testExportSNIRFOneDimensionalVectors(testCase)
             % probe/wavelengths and data/time are 1-D datasets
             filepath = testCase.createTempPath('.snirf');
@@ -672,8 +716,12 @@ classdef ExportTest < matlab.unittest.TestCase
             testCase.verifyEqual(string(h5read(filepath, '/nirs/probe/landmarkLabels'))', ["Nz" "Iz" "LPA" "RPA" "Cz"]);
             lm = h5read(filepath, '/nirs/probe/landmarkPos3D')';
             testCase.verifyEqual(lm(3, :), [-83.8 -18.6 -57.2 3], 'AbsTol', 1e-9);
-            testCase.verifyEqual(char(h5read(filepath, '/nirs/probe/coordinateSystem')), 'Other');
-            testCase.verifyTrue(contains(string(h5read(filepath, '/nirs/probe/coordinateSystemDescription')), 'ICBM152'));
+            % 'MNI' is not a BIDS/SNIRF coordinate system: it is kept in the
+            % metadata and probe/coordinateSystem is not written
+            probeNames = {h5info(filepath, '/nirs/probe').Datasets.Name};
+            testCase.verifyFalse(ismember('coordinateSystem', probeNames));
+            testCase.verifyEqual(char(h5read(filepath, '/nirs/metaDataTags/CoordinateSystem')), 'MNI');
+            testCase.verifyTrue(contains(string(h5read(filepath, '/nirs/metaDataTags/CoordinateSystemDescription')), 'ICBM152'));
             testCase.verifyEqual(char(h5read(filepath, '/nirs/metaDataTags/MeasurementTime')), '19:35:24.461+00:00');
 
             reimported = pf2.import.importSNIRF(filepath, false);

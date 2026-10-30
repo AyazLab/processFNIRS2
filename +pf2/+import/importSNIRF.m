@@ -185,8 +185,14 @@ if ~isfield(data, 'measurementList') || isempty(data.measurementList)
     error('pf2:importSNIRF:noMeasurementList', 'No measurement list found in SNIRF file');
 end
 
-% Convert measurement list to table for easier handling
+% Convert measurement list to table for easier handling. SNIRF stores the
+% index and type fields as integers; work with doubles.
 measurementList = struct2table(data.measurementList);
+for mlVar = measurementList.Properties.VariableNames
+    if isinteger(measurementList.(mlVar{1}))
+        measurementList.(mlVar{1}) = double(measurementList.(mlVar{1}));
+    end
+end
 
 % Add dataTypeLabel column if not present (some SNIRF files use numeric dataType only)
 if ~ismember('dataTypeLabel', measurementList.Properties.VariableNames)
@@ -211,7 +217,11 @@ if isfield(metaDataTags, 'Normalized') && ...
    (strcmpi(metaDataTags.Normalized, '1') || strcmpi(metaDataTags.Normalized, 'true'))
     if isfield(metaDataTags, 'RawMax')
         % Find all raw DC channels (both normal and dark)
+        % Raw channels: dataType 1 (CW amplitude) or a pf2 'raw-DC' label
         rawDC_channels = contains(cat(1, measurementList.dataTypeLabel), 'raw-DC');
+        if ismember('dataType', measurementList.Properties.VariableNames)
+            rawDC_channels = rawDC_channels(:) | measurementList.dataType(:) == 1;
+        end
         rawMax = str2double(metaDataTags.RawMax);
         
         % De-normalize by multiplying by rawMax
@@ -753,11 +763,14 @@ landmarks = [];
 if isfield(probeInfo, 'coordinateSystem')
     coordSys = probeInfo.coordinateSystem;
 end
-% pf2 writes a non-BIDS device tag (e.g. 'MNI') as probe 'Other' plus a
-% CoordinateSystem metadata tag; restore the device tag
-if strcmpi(strtrim(char(string(coordSys))), 'Other') && isfield(metaDataTags, 'CoordinateSystem') ...
-        && ~isempty(metaDataTags.CoordinateSystem)
+% pf2 writes a non-BIDS device tag (e.g. 'MNI') to metaDataTags rather than
+% probe/coordinateSystem (earlier versions wrote probe 'Other'); restore it
+if (isempty(coordSys) || strcmpi(strtrim(char(string(coordSys))), 'Other')) ...
+        && isfield(metaDataTags, 'CoordinateSystem') && ~isempty(metaDataTags.CoordinateSystem)
     coordSys = char(metaDataTags.CoordinateSystem);
+    if isfield(metaDataTags, 'CoordinateSystemDescription') && ~isempty(metaDataTags.CoordinateSystemDescription)
+        coordSysDesc = char(metaDataTags.CoordinateSystemDescription);
+    end
 end
 
 if isempty(coordSys)
