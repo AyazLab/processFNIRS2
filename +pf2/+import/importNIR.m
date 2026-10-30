@@ -62,6 +62,13 @@ function [fNIR] = importNIR(nir_filename, mrk_filename, channelCheck, varargin)
 %   - When markers come from more than one .mrk file, a MarkerSource column
 %     holds the file each marker came from (1 = <name>.mrk, 2 = <name>_C.mrk,
 %     3 = <name>_Mark1.mrk, 4 = <name>_Mark2.mrk).
+%   - COBI Studio Modern files whose last column is the device sample counter
+%     are timed from the counter (pf2_base.nirCounterTimebase): the counter
+%     tick is fitted to the PC clock (33/32768 s by default on the 2000M,
+%     1 ms on the 2000S and 3000C), each segment between counter resets is
+%     anchored to its PC latency floor, and fs is 1/(tick x mean counts per
+%     sample). Segment, gap and latency QC is in info.timebase. Other files
+%     use the PC time column.
 %   - t0 is the header Start Time as local wall-clock time with no time zone;
 %     pass 'TimeZone' to pf2.export.asSNIRF to write absolute times.
 %
@@ -445,7 +452,22 @@ data(allNaN>0,:)=[];
 
 % Check for sample count in last column and drop it (newer cobi)
 lastCol=data(:,end);
-lastColIsSampleCount = all(diff(lastCol(1:100))>0)&&max(lastCol)>100000;
+% Device model from the header (COBI Studio Modern: 'Data Source: ..., Model 2000M Imager, ...')
+model='';
+if(hasDataSource)
+    modelTok=regexp(header.DataSource,'Model\s+(\w+)','tokens','once');
+    if(~isempty(modelTok))
+        model=modelTok{1};
+    end
+end
+% The counter is a rising integer column. Large values identify it on any
+% device; on the models known to write it (2000M, 2000S, 3000C) a short
+% recording whose counter is still small is recognised by its steady step.
+% The 1200W counter is not used: those files stay on the PC time column.
+firstSteps=diff(lastCol(1:min(100,end)));
+isCounterModel=any(contains(model,{'2000M','2000S','3000C'}));
+lastColIsSampleCount = all(firstSteps>0)&&(max(lastCol)>100000|| ...
+    (isCounterModel&&all(lastCol==round(lastCol))&&median(firstSteps)>=10));
 
 if(size(data,2)>(size(baseline,2))||lastColIsSampleCount) % Last column in newer cobi is sample count, but not included in baseline
      if(size(data,2)==size(baseline,2))
@@ -455,26 +477,20 @@ if(size(data,2)>(size(baseline,2))||lastColIsSampleCount) % Last column in newer
     data=data(:,1:end-1);
 end
 
+timebase=[];
 if(lastColIsSampleCount)
-    % if we have sample count rewrite time data with that
-    countResets = find(diff(lastCol)<0);
-    newTime=data(1,1)+lastCol/1000-lastCol(1)/1000;
-    
-    for r=1:length(countResets)
-        timeDiff=data(countResets(r)+1,1)-data(countResets(r),1);
-        newTime(countResets(r)+1:end,1)=-newTime(countResets(r)+1)+newTime(countResets(r,1))+timeDiff+newTime(countResets(r)+1:end,1);
-        warning('Count resets detected\n')
-    end
-    data(:,1)=newTime;
+    % Time from the sample counter: tick fitted to the PC clock per segment,
+    % each segment anchored to its latency floor (see pf2_base.nirCounterTimebase)
+    [data(:,1),timebase]=pf2_base.nirCounterTimebase(data(:,1),lastCol,'Model',model);
 end
-
-
-
-
 
 fNIR.raw=data;
 fNIR.time=data(:,1);
-fNIR.fs=1./median(diff(fNIR.time));
+if(~isempty(timebase))
+    fNIR.fs=timebase.fs;
+else
+    fNIR.fs=1./median(diff(fNIR.time));
+end
 fNIR.fchMask=fchMask;
 
 if(isfield(markers,'data'))
@@ -494,6 +510,9 @@ end
 
 fNIR.info.filename=nir_filename;
 fNIR.info.baseline=baseline;
+if(~isempty(timebase))
+    fNIR.info.timebase=timebase;
+end
 
 if(~isempty(log_info)&&isfield(log_info,'SubjectID'))
     fNIR.info.SubjectID=log_info.SubjectID;

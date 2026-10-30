@@ -191,4 +191,9 @@ if(PF2.mergedProbe) %All channel numbers are unique for merged probes
 else
    error('pf2_base:pf2_updateCurrentDevice:notImplemented', 'Not Yet Implemented for seperate probe data,\nAssumes concatenated datasets with unique channels in the config file'); 
 end
+
+% A counter time base (COBI .nir) has its rate from the fitted counter tick
+if(isfield(fData,'fs')&&isfield(fData,'info')&&isstruct(fData.info)&&isfield(fData.info,'timebase')&&isfield(fData.info.timebase,'fs'))
+    fData.fs=fData.info.timebase.fs;
+end
 end
