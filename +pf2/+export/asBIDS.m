@@ -50,6 +50,8 @@ function bidsRoot = asBIDS(allData, rootDir, opts)
 %   'Verbose'      - Print progress (default: true).
 %   'TimeZone'     - Time zone of the recordings' wall-clock start times,
 %                    passed to pf2.export.asSNIRF (default: '').
+%   'Target'       - 'snirf' (default) or 'mne', passed to pf2.export.asSNIRF
+%                    (MNE compatibility: every gap filled, no landmarks).
 %
 % Entity resolution (per recording, from .info, case-insensitive):
 %   sub  - SubjectID | SubjectId | Subject | subject; else sub-padded index.
@@ -102,6 +104,7 @@ arguments
     opts.Overwrite = false
     opts.Verbose = true
     opts.TimeZone = ''
+    opts.Target = 'snirf'
 end
 
 % --- Normalize inputs ---
@@ -175,7 +178,8 @@ for i = 1:nRec
     % Strip dark/ambient (non raw-DC) channels so the .snirf and the derived
     % channels.tsv carry only real source-detector measurements (no
     % wavelength_nominal=0 placeholder rows).
-    snirf = pf2.export.asSNIRF(data, snirfPath, false, true, 'TimeZone', opts.TimeZone);
+    snirf = pf2.export.asSNIRF(data, snirfPath, false, true, 'TimeZone', opts.TimeZone, ...
+        'Target', opts.Target);
     nirs = snirf.nirs;   % single-recording export always uses /nirs
 
     % Run-level sidecars (task-/run- entities are permitted on these suffixes)

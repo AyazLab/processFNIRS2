@@ -275,6 +275,14 @@ classdef NirCounterTimebaseTest < matlab.unittest.TestCase
             k = [find(rec.truth >= rec.truth(1) + 150, 1), find(rec.truth >= rec.truth(1) + 325, 1), ...
                 find(rec.truth >= rec.truth(1) + 340, 1)];
             testCase.writeMrk([root '_Mark1.mrk'], rec.pc(k) - 0.010, [11 12 13]);
+            % Manual markers (<root>_C.mrk) are QPC times from the session
+            % start (frame 1's clock, not reset by the restarts), written
+            % with the header start code (40 s) added
+            kManual = [find(rec.truth >= rec.truth(1) + 100, 1), find(rec.truth >= rec.truth(1) + 360, 1)];
+            qpc = rec.truth(kManual) - rec.finalOrigin + rec.frame1Origin;
+            fid = fopen([root '_C.mrk'], 'w');
+            fprintf(fid, '%.3f\t%d\t0\tx\ty\r\n', [40 + qpc(:)'; 21 22]);
+            fclose(fid);
 
             prevGUI = pf2_base.channelCheckGUIEnabled(false);
             testCase.addTeardown(@() pf2_base.channelCheckGUIEnabled(prevGUI));
@@ -288,6 +296,10 @@ classdef NirCounterTimebaseTest < matlab.unittest.TestCase
             expected = rec.truth(k(order));
             testCase.verifyLessThan(max(abs(got(:) - expected(:))), 0.06, ...
                 'Markers should line up with their samples in the final PC frame');
+            manual = data.markers.Time(ismember(data.markers.Code, [21 22]));
+            expectedManual = rec.truth(kManual);
+            testCase.verifyLessThan(max(abs(manual(:) - expectedManual(:))), 0.06, ...
+                'Manual markers move by frame 1''s offset');
             % Header Start Time is the wall clock at PC time 0 of frame 1
             frame1Offset = data.info.timebase.frames.Offset(1);
             testCase.verifyLessThan(abs(seconds(data.t0 - ...
@@ -416,6 +428,8 @@ classdef NirCounterTimebaseTest < matlab.unittest.TestCase
             rec.pc = pc(keep);
             rec.counter = counter(keep);
             rec.truth = final + truth(keep);   % in the final PC frame
+            rec.frame1Origin = 50;             % PC clock of the first frame at true time 0
+            rec.finalOrigin = final;           % final PC frame at true time 0
         end
 
         function writeNir(~, fname, rec, nBaseline, model)

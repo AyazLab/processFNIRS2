@@ -64,7 +64,9 @@ function [fNIR] = importNIR(nir_filename, mrk_filename, channelCheck, varargin)
 %     3 = <name>_Mark1.mrk, 4 = <name>_Mark2.mrk).
 %   - When the PC time column restarts, markers and the header start time
 %     are moved into the PC frame of the time base (info.timebase.frames);
-%     each marker file is placed in the sequence of frames that contains
+%     manual marker files (<name>_C.mrk, timed by the PC QPC timer from the
+%     session start) move by frame 1's offset, like the start time; each
+%     automatic marker file is placed in the sequence of frames that contains
 %     its PC times, keeps it in order (a drop of more than 1 s marks a
 %     restart) and favours the longest frames; markers that could belong
 %     to more than one frame are warned about.
@@ -308,6 +310,7 @@ if(iscell(mrk_filename))
     % contributed markers.
     markerTbl=[];
     nSources=0;
+    manualSources=[];
     for i=1:length(mrk_filename)
 		markerCell{i}=importMrk(mrk_filename{i},header.startCode);
         if(isfield(markerCell{i},'data')&&~isempty(markerCell{i}.data))
@@ -317,6 +320,9 @@ if(iscell(mrk_filename))
                 continue;
             end
             fileTbl.MarkerSource=repmat(i,height(fileTbl),1);
+            if(isfield(markerCell{i},'manual')&&markerCell{i}.manual)
+                manualSources(end+1)=i; %#ok<AGROW>
+            end
             nSources=nSources+1;
             markerTbl=pf2_base.mergeMarkers(markerTbl,fileTbl);
         end
@@ -327,6 +333,7 @@ if(iscell(mrk_filename))
     if(~isempty(markerTbl)) % Merged in file order; sorted once times are final (.info sections are only preserved for first marker file)
         markers.data=markerTbl;
         markers.nSources=nSources;
+        markers.manualSources=manualSources;
     end
     
 else
@@ -513,8 +520,12 @@ fNIR.fchMask=fchMask;
 % restart, so move them into it
 if(~isempty(timebase)&&isfield(markers,'data')&&istable(markers.data)&& ...
         height(timebase.frames)>1&&ismember('MarkerSource',markers.data.Properties.VariableNames))
+    manualSources=[];
+    if(isfield(markers,'manualSources'))
+        manualSources=markers.manualSources;
+    end
     [markers.data.Time,timebase.markerFrames,nAmbiguous]=markersToFrames( ...
-        markers.data.Time,markers.data.MarkerSource,timebase.frames);
+        markers.data.Time,markers.data.MarkerSource,timebase.frames,manualSources);
     timebase.ambiguousMarkers=nAmbiguous;
     if(nAmbiguous>0)
         warning('pf2:importNIR:ambiguousMarkerFrame', ...
@@ -816,7 +827,7 @@ function cfgName = lookupProbeCfg(modelDigits, probeStyle)
     end
 end
 
-function [t,frameOf,nAmbiguous]=markersToFrames(t,source,frames)
+function [t,frameOf,nAmbiguous]=markersToFrames(t,source,frames,manualSources)
 % Place each marker in a PC frame and add that frame's offset. Within one
 % marker file the markers are in time order, so frames never go back, and a
 % marker time that drops by more than 1 s (the PC restart threshold) means a
@@ -826,6 +837,12 @@ function [t,frameOf,nAmbiguous]=markersToFrames(t,source,frames)
 % the one with the longest frames is chosen (markers are more likely in
 % the longer parts of a recording). A marker whose frame differs between
 % feasible sequences is counted as ambiguous.
+% Manual marker files (<name>_C.mrk) are timed by the PC QPC timer from the
+% session start, a clock that PC column restarts do not reset: they are in
+% frame 1's clock and move by frame 1's offset, like the start time.
+if(nargin<4)
+    manualSources=[];
+end
 nF=height(frames);
 lo=frames.PCStart; hi=frames.PCEnd;
 lo(1)=-inf; hi(end)=inf;
@@ -837,6 +854,10 @@ frameOf=nan(size(t));
 ambiguous=false(size(t));
 for s=unique(source(:))'
     idx=find(source==s);
+    if(ismember(s,manualSources))
+        frameOf(idx)=1;
+        continue;
+    end
     n=numel(idx);
     m=t(idx);
     % Allowed frames per marker
@@ -964,7 +985,8 @@ function markers=importManualMrkFile(mrkid,startCode,useStrSplit)
 
 	frewind(mrkid);
     
-    markers.info.startcode=startCode; % time noting start of fNIRS file 
+    markers.info.startcode=startCode; % time noting start of fNIRS file
+    markers.manual=true; % times from the PC QPC timer, continuous from the session start 
         % manual marker values are subtracted from this
 	
     if(~useStrSplit) %faster but more error prone

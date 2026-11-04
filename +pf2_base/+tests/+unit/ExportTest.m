@@ -641,8 +641,40 @@ classdef ExportTest < matlab.unittest.TestCase
             testCase.verifyEqual(height(reimported.markers), height(data.markers));
         end
 
+        function testExportSNIRFTargetMNE(testCase)
+            % Target 'mne' fills every gap unless MaxFillSamples is given,
+            % and warns about irregular sample steps
+            data = testCase.RawData;
+            n = numel(data.time);
+            cut = round(n / 2);
+            data.time(cut+1:end) = data.time(cut+1:end) + 7.3;
+            filepath = testCase.createTempPath('.snirf');
+            pf2.export.asSNIRF(data, filepath, 'TimeZone', 'UTC', 'Target', 'mne');
+            t = h5read(filepath, '/nirs/data1/time');
+            testCase.verifyLessThan(max(diff(t)), 1.5 / data.fs);
+            testCase.verifyGreaterThan(numel(t), n + 60);
+
+            filepath2 = testCase.createTempPath('.snirf');
+            prev = warning('off', 'pf2:asSNIRF:unfilledGaps');
+            testCase.addTeardown(@() warning(prev));
+            pf2.export.asSNIRF(data, filepath2, 'TimeZone', 'UTC', 'Target', 'mne', 'MaxFillSamples', 0);
+            testCase.verifyEqual(numel(h5read(filepath2, '/nirs/data1/time')), n, ...
+                'An explicit MaxFillSamples overrides the preset');
+
+            irregular = testCase.RawData;
+            prevRng = rng;
+            testCase.addTeardown(@() rng(prevRng));
+            rng(5);
+            irregular.time = irregular.time(1) + cumsum([0; 0.1 * (0.85 + 0.3 * rand(n - 1, 1))]);
+            filepath3 = testCase.createTempPath('.snirf');
+            prevIrr = warning('on', 'pf2:asSNIRF:irregularForMNE');
+            testCase.addTeardown(@() warning(prevIrr));
+            testCase.verifyWarning(@() pf2.export.asSNIRF(irregular, filepath3, 'TimeZone', 'UTC', ...
+                'Target', 'mne', 'MaxFillSamples', 0), 'pf2:asSNIRF:irregularForMNE');
+        end
+
         function testExportSNIRFGapsInMNE(testCase)
-            % A recording with a gap filled on request opens in MNE with the
+            % A recording exported with Target 'mne' opens in MNE with the
             % gap as a BAD annotation and a marker after the gap on its own
             % sample. Skipped when Python with MNE is not available.
             [status, ~] = system('python3 -c "import mne, h5py"');
@@ -653,7 +685,7 @@ classdef ExportTest < matlab.unittest.TestCase
             data.time(cut+1:end) = data.time(cut+1:end) + 7.3;
             data.markers = pf2_base.normalizeMarkers([data.time(cut + 200), 77, 0, 1]);
             filepath = testCase.createTempPath('.snirf');
-            pf2.export.asSNIRF(data, filepath, 'TimeZone', 'UTC', 'MaxFillSamples', Inf);
+            pf2.export.asSNIRF(data, filepath, 'TimeZone', 'UTC', 'Target', 'mne');
             nFilled = str2double(h5read(filepath, '/nirs/metaDataTags/FilledGapSamples'));
 
             script = [tempname '.py'];
@@ -864,6 +896,13 @@ classdef ExportTest < matlab.unittest.TestCase
             testCase.verifyEqual(string(h5read(filepath2, '/nirs/probe/sourceLabels'))', string(probeInfo.probes.labels_s));
             testCase.verifyEqual(string(h5read(filepath2, '/nirs/probe/detectorLabels'))', string(probeInfo.probes.labels_d));
             testCase.verifyEqual(string(h5read(filepath2, '/nirs/probe/landmarkLabels'))', ["Nz" "Iz" "LPA" "RPA" "Cz"]);
+
+            % Target 'mne' leaves the landmarks out (MNE 1.13 misreads them)
+            filepath3 = testCase.createTempPath('.snirf');
+            pf2.export.asSNIRF(reimported, filepath3, 'TimeZone', 'UTC', 'Target', 'mne');
+            probeNames = {h5info(filepath3, '/nirs/probe').Datasets.Name};
+            testCase.verifyFalse(any(ismember({'landmarkPos3D', 'landmarkLabels'}, probeNames)));
+            testCase.verifyTrue(ismember('sourceLabels', probeNames));
         end
 
         function testImportNIRStarWavelengthFiles(testCase)

@@ -40,6 +40,7 @@ function [snirfData] = asSNIRF(fNIRcells, filepath, varargin)
 %   'StripExtraRawChannels'  - Strip dark/ambient channels (default: true)
 %   'Verbose'                - Print progress messages (default: true)
 %   'TimeZone'               - Also accepted in single-file mode (see below)
+%   'Target', 'MaxFillSamples' - Also accepted in single-file mode (see below)
 %   'IncludeIdentifying'     - Also accepted in single-file mode (see below)
 %
 % Name-Value Parameters:
@@ -51,6 +52,13 @@ function [snirfData] = asSNIRF(fNIRcells, filepath, varargin)
 %                 the zone, and UnixTime/AcquisitionStartTime are written. Without one,
 %                 MeasurementTime has no offset, UnixTime is omitted and
 %                 'pf2:asSNIRF:noTimeZone' is warned.
+%   'Target'    - 'snirf' (default) or 'mne'. 'mne' prepares the file for
+%                 MNE-Python: dark channels are stripped, every gap is filled
+%                 (MaxFillSamples Inf unless given), landmarks are left out
+%                 (MNE 1.13 reads landmarkPos3D 1000x too large), and
+%                 irregular sample steps are warned about
+%                 ('pf2:asSNIRF:irregularForMNE'). The default writes the
+%                 data as recorded, without interpolated samples.
 %   'MaxFillSamples' - Largest number of missing samples filled per gap
 %                 (default: 1; 0 never fills, Inf fills every gap). A gap is
 %                 a time step longer than 1.5 sample periods. A gap of at
@@ -150,6 +158,9 @@ if isBatchMode
     % Parse batch name-value parameters
     batchOpts = parseBatchOpts(varargin{:});
     paths = pf2_base.buildExportPaths(fNIRcells, filepath, '.snirf', batchOpts);
+    if strcmpi(batchOpts.Target, 'mne') && batchOpts.maxFillDefault
+        batchOpts.MaxFillSamples = Inf;
+    end
     n = numel(fNIRcells);
     for i = 1:n
         if batchOpts.Verbose
@@ -158,7 +169,8 @@ if isBatchMode
         pf2.export.asSNIRF(fNIRcells{i}, paths{i}, ...
             batchOpts.NormalizeRaw, batchOpts.StripExtraRawChannels, ...
             'TimeZone', batchOpts.TimeZone, ...
-            'IncludeIdentifying', batchOpts.IncludeIdentifying, 'MaxFillSamples', batchOpts.MaxFillSamples);
+            'IncludeIdentifying', batchOpts.IncludeIdentifying, 'MaxFillSamples', batchOpts.MaxFillSamples, ...
+            'Target', batchOpts.Target);
     end
     if batchOpts.Verbose
         fprintf('Batch export complete: %d files written to %s\n', n, filepath);
@@ -187,12 +199,27 @@ p.addParameter('StripExtraRawChannels', stripExtraRawChannels, @(x) islogical(x)
 p.addParameter('TimeZone', '', @(x) ischar(x) || isstring(x));
 p.addParameter('IncludeIdentifying', false, @(x) islogical(x) || isnumeric(x));
 p.addParameter('MaxFillSamples', 1, @(x) isnumeric(x) && isscalar(x) && x >= 0);
+p.addParameter('Target', 'snirf', @(x) any(strcmpi(char(x), {'snirf', 'mne'})));
 p.parse(args{:});
 normalizeRaw = p.Results.NormalizeRaw;
 stripExtraRawChannels = p.Results.StripExtraRawChannels;
 timeZone = char(p.Results.TimeZone);
 includeIdentifying = logical(p.Results.IncludeIdentifying);
 maxFill = p.Results.MaxFillSamples;
+target = lower(char(p.Results.Target));
+if strcmp(target, 'mne')
+    % MNE compatibility: MNE assumes uniform sampling and treats dark
+    % channels as 0 nm CW channels, so dark channels are stripped and every
+    % gap is filled (unless MaxFillSamples is given)
+    if ~stripExtraRawChannels
+        warning('pf2:asSNIRF:mneStripsDark', ...
+            'Target ''mne'' strips dark channels; StripExtraRawChannels=false is ignored.');
+        stripExtraRawChannels = true;
+    end
+    if ismember('MaxFillSamples', p.UsingDefaults)
+        maxFill = Inf;
+    end
+end
 
 [ filepathdir, filename, ext ] = fileparts(filepath);
 
@@ -514,12 +541,28 @@ for n = 1:numNIRS
         end
     end
 
+    if strcmp(target, 'mne')
+        % MNE 1.13 applies the length scaling to landmarkPos3D twice and
+        % reads landmarks 1000x too large; leave them out for MNE
+        probe = rmfield(probe, intersect(fieldnames(probe), {'landmarkPos3D', 'landmarkLabels'}));
+    end
+
     % Time from 0 at the first sample, and gaps filled on the sample grid
     % (readers such as MNE assume uniform sampling and place annotations by
     % sample count)
     [data, stim, aux, nFilled, nGaps] = rebaseAndFillGaps(data, stim, aux, timeOrigin, ...
         curStruct, maxFill);
     metaDataTags.TimeOrigin = c2v(sprintf('%.6f', timeOrigin));
+    if strcmp(target, 'mne') && numel(data.time) > 2
+        steps = diff(data.time(:));
+        irregular = mean(abs(steps / median(steps) - 1) > 0.05);
+        if irregular > 0.2
+            warning('pf2:asSNIRF:irregularForMNE', ...
+                ['%.0f%% of sample steps differ from the median step by more than 5%%. ' ...
+                 'MNE assumes uniform sampling, so annotations may drift; consider ' ...
+                 'resampling to a uniform grid (pf2.data.resample) before export.'], 100 * irregular);
+        end
+    end
     if nGaps > 0
         metaDataTags.GapStim = c2v('BAD_gap');
         metaDataTags.FilledGapSamples = c2v(num2str(nFilled));
@@ -1288,6 +1331,8 @@ function opts = parseBatchOpts(varargin)
     p.addParameter('TimeZone', '', @(x) ischar(x) || isstring(x));
     p.addParameter('IncludeIdentifying', false, @(x) islogical(x) || isnumeric(x));
     p.addParameter('MaxFillSamples', 1, @(x) isnumeric(x) && isscalar(x) && x >= 0);
+    p.addParameter('Target', 'snirf', @(x) any(strcmpi(char(x), {'snirf', 'mne'})));
     p.parse(varargin{:});
     opts = p.Results;
+    opts.maxFillDefault = ismember('MaxFillSamples', p.UsingDefaults);
 end
