@@ -84,6 +84,7 @@ function results = runAllTests()
 
     % Configure runner with verbose output
     runner = TestRunner.withTextOutput('Verbosity', 3);
+    runner.addPlugin(pf2_base.tests.CloseGUIsPlugin);   % close windows tests leave open
 
     % Run all tests
     fprintf('--- Running Tests ---\n\n');

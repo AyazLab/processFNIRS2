@@ -60,6 +60,7 @@ function results = runCI(lane)
     end
 
     runner = TestRunner.withTextOutput('Verbosity', 2);
+    runner.addPlugin(pf2_base.tests.CloseGUIsPlugin);   % close windows tests leave open
     results = runner.run(suite);
 
     nTotal      = numel(results);

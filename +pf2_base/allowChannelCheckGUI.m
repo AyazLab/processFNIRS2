@@ -32,19 +32,5 @@ function tf = allowChannelCheckGUI()
 
     tf = pf2_base.channelCheckGUIEnabled() ...
         && ~pf2_base.isHeadless() ...
-        && ~underTestFramework();
-end
-
-%%_Subfunctions_________________________________________________________
-
-function tf = underTestFramework()
-% UNDERTESTFRAMEWORK True if a matlab.unittest frame is on the call stack
-    tf = false;
-    try
-        st = dbstack('-completenames');
-        files = {st.file};
-        marker = [filesep 'testframework' filesep];
-        tf = any(contains(files, marker));
-    catch
-    end
+        && ~pf2_base.underTestFramework();
 end

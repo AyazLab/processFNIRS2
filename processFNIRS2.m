@@ -7,7 +7,8 @@ function varargout = processFNIRS2(varargin)
 %      Always takes a simple array containing the light intensity data and 
 %      will optionally load a specific parameters using the varargin option
 %      Specifiying an output will hide the GUI unless 'ShowGUI',true is
-%      passed as an argument
+%      passed as an argument. Inside the matlab.unittest framework the GUI
+%      is not opened unless 'ShowGUI',true is passed.
 
 
 % To Do: Add 'add function' to configureMethods   
@@ -241,8 +242,14 @@ else
     cfgFilePath='';
 end
 
-% Don't show GUI if Context is provided (context implies headless processing)
-ShowGUI=p.Results.ShowGUI||isempty(varargin)||(nargout==0&&~isempty(data)&&isempty(p.Results.Context));
+% Don't show GUI if Context is provided (context implies headless processing).
+% Inside the matlab.unittest framework the GUI is not opened by default (a
+% window left open would stall the test run); 'ShowGUI',true still opens it.
+defaultGUI=isempty(varargin)||(nargout==0&&~isempty(data)&&isempty(p.Results.Context));
+if(defaultGUI&&pf2_base.underTestFramework())
+    defaultGUI=false;
+end
+ShowGUI=p.Results.ShowGUI||defaultGUI;
 
 % --- Noop pass-through for empty / non-processable inputs ------------------
 % The pipeline converts raw light intensities (data.raw) into hemoglobin, so a

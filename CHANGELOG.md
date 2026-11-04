@@ -21,6 +21,7 @@ NIRx import and SNIRF export follow-ups: vendor geometry, NIRStar recordings wit
 
 ### Fixes
 
+- Tests no longer stall on a GUI left open. `processFNIRS2` called without an output does not open its GUI by default inside the test framework (an explicit `'ShowGUI', true` still opens it), and `pf2_base.tests.runCI` and `pf2_base.tests.runAllTests` add `pf2_base.tests.CloseGUIsPlugin`, which deletes windows a test class leaves open. The test-framework check is shared with the channel-check gate as `pf2_base.underTestFramework`.
 - `pf2.export.asSNIRF` builds `MeasurementDate`, `MeasurementTime`, `UnixTime` and `AcquisitionStartTime` from one integer millisecond count. Rounding to the millisecond as a double could leave a value such as 8.0079999 s, which the time format truncated, so `MeasurementTime` and `UnixTime` could differ by 1 ms.
 - `pf2_base.tests.unit.NirCounterTimebaseTest/testNoTimeColumnWarnedOnce` no longer depends on running first in the session: it checks that a second recording does not warn again instead of resetting the once-per-session flag.
 - `pf2.import.importNIR` builds the time base of COBI Studio Modern files from the device sample counter (`pf2_base.nirCounterTimebase`):
