@@ -147,9 +147,10 @@ end
 
 % A counter time base (COBI .nir, see pf2_base.nirCounterTimebase) has its
 % rate from the fitted counter tick; the median step would round it to a
-% whole number of counts (4.99 Hz instead of 5.00 Hz on a 2000M)
-if ~isempty(fs) && isfield(dataStruct, 'info') && isstruct(dataStruct.info) ...
-        && isfield(dataStruct.info, 'timebase') && isfield(dataStruct.info.timebase, 'fs')
+% whole number of counts (4.99 Hz instead of 5.00 Hz on a 2000M). It applies
+% only while the time vector is still the one it was computed for (not
+% after resampling or cutting).
+if ~isempty(fs) && pf2_base.timebaseMatches(dataStruct, resolvedTime)
     fs = dataStruct.info.timebase.fs;
 end
 

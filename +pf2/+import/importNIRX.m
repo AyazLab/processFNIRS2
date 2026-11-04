@@ -94,9 +94,9 @@ end
 channelCheckVersion=pf2_base.channelCheckVersion();
 modelOverride='';
 for vi_=1:2:numel(varargin)
-    if ischar(varargin{vi_}) && strcmpi(varargin{vi_},'ChannelCheckVersion')
+    if (ischar(varargin{vi_}) || isstring(varargin{vi_})) && strcmpi(varargin{vi_},'ChannelCheckVersion')
         channelCheckVersion=varargin{vi_+1};
-    elseif ischar(varargin{vi_}) && strcmpi(varargin{vi_},'Model')
+    elseif (ischar(varargin{vi_}) || isstring(varargin{vi_})) && strcmpi(varargin{vi_},'Model')
         modelOverride=char(varargin{vi_+1});
     end
 end
@@ -128,6 +128,11 @@ if isfolder(folderDIR)
         error('pf2:importNIRX:noHdrInFolder', ...
             'No .hdr or .nirs config file found in folder ''%s''.', folderDIR);
     end
+    if numel(hdr) > 1
+        warning('pf2:importNIRX:severalRecordings', ...
+            'Folder ''%s'' holds %d recordings; importing %s. Pass a file path to choose.', ...
+            folderDIR, numel(hdr), hdr(1).name);
+    end
     folderDIR = fullfile(folderDIR, hdr(1).name);
 end
 
@@ -139,6 +144,11 @@ folderDIR = strrep(folderDIR, '\', '/');
 folderDIRparts=strsplit(folderDIR,'/');
 filename=folderDIRparts{end};
 pathname=folderDIR(1:end-length(filename));
+% Root of the selected recording (Aurora headers are <root>_config.hdr);
+% only files of this recording are read, so a folder holding several
+% recordings does not mix them
+[~,recRoot]=fileparts(filename);
+recRoot=regexprep(recRoot,'_config$','');
 
 curdir=cd;
 cdCleanup = onCleanup(@() cd(curdir));
@@ -155,7 +165,10 @@ end
 
 x=0;
 for i=1:length(d)
-    if(~d(i).isdir)
+    nm=d(i).name;
+    belongs=strcmp(nm,'digpts.txt')||(strncmp(nm,recRoot,numel(recRoot))&&numel(nm)>numel(recRoot)&& ...
+        any(nm(numel(recRoot)+1)=='._'));
+    if(~d(i).isdir&&belongs)
         x=x+1;
         files(x,1)={d(i).name};
         if ~isempty(strfind(files{x,1},'.wl'))
@@ -182,6 +195,8 @@ for i=1:length(d)
         end
     end
 end
+files=files(1:x,:);
+files(cellfun(@isempty,files(:,2)),2)={''};
 clear x dir;
 
 fNIR=[];
@@ -203,15 +218,13 @@ for i=1:size(files,1)
     
     if(strcmp(files{i,2},'nirs_file'))
         % Read after the loop, once the .hdr has been parsed
-        filenameParts=strsplit(filename,'.');
-        fileroot=filenameParts{1};
+        [~,fileroot]=fileparts(filename);
         nirsFile=filename;
         nirsRoot=fileroot;
     end
     
     if(strcmp(files{i,2},'info'))
-        filenameParts=strsplit(filename,'.');
-        fileroot=filenameParts{1};
+        [~,fileroot]=fileparts(filename);
         fNIR.info.probeInfo=pf2_base.external.INI('File',filename);
         fNIR.info.probeInfo.read();
         pInfo=fNIR.info.probeInfo;
@@ -242,8 +255,7 @@ for i=1:size(files,1)
         if(isprop(pInfo,'ImagingParameters')&&isfield(pInfo.ImagingParameters,'Wavelengths'))
             s=pInfo.ImagingParameters.Wavelengths;
             s(s==''''|s=='"')=[];
-            s=strsplit(s,'\t');
-            fNIR.info.curWv=str2double(s);
+            fNIR.info.curWv=str2double(regexp(s,'\d+(\.\d+)?','match'));
         end
         
         if(isprop(pInfo,'DataStructure')&&isfield(pInfo.DataStructure,'S_D_Key'))
@@ -349,7 +361,7 @@ end
 if(~isempty(nirsFile))
     probeInfo=load(nirsFile,'-mat');
 elseif(~isempty(wvCell))
-    nirsRoot=regexprep(strtok(files{find(strcmp(files(:,2),'wavelength'),1),1},'.'),'_config$','');
+    nirsRoot=recRoot;
     probeInfo=nirsFromWavelengthFiles(wvCell,fNIR,nirsRoot);
     if((~isfield(fNIR,'markers')||isempty(fNIR.markers))&&isfile([nirsRoot '.evt']))
         evtMarkers=readEvt([nirsRoot '.evt'],1/median(diff(probeInfo.t)));
@@ -374,7 +386,10 @@ end
 if(isfield(probeInfo,'d'))
     fNIR.raw=[probeInfo.d]; % don't load t in data
 end
-if(isfield(probeInfo,'s'))
+hdrEvents=isfield(fNIR,'markers')&&istable(fNIR.markers)&&height(fNIR.markers)>0;
+if(isfield(probeInfo,'s')&&~hdrEvents)
+    % Trigger columns of the .nirs stim matrix; the .hdr Events, when
+    % present, keep the actual trigger codes and are used instead
     mrk=zeros(0,2);
     for mrkID=1:size(probeInfo.s,2)
         onsets=fNIR.time(probeInfo.s(:,mrkID)==1);
@@ -628,8 +643,8 @@ end
 
 fNIR.fchMask=ones(1,numCh);
 
-if(~exist('dataRoot','var'))
-    dataRoot=regexprep(fileroot,'_config$','');
+if(~exist('dataRoot','var')||isempty(dataRoot))
+    dataRoot=recRoot;
 end
 
 % Recording start (local wall-clock time, no zone): the first frame of the
@@ -771,7 +786,15 @@ end
 wvCell=wvCell(~cellfun(@isempty,wvCell));
 numWv=numel(wvCell);
 key=fNIR.info.sd_key;
+key=key(all(isfinite(key),2),:);
 mask=fNIR.info.sd_mask;
+if(any(key(:,1)==0)||any(key(:,2)==0))
+    % Aurora writes 0-based source/detector indices in S-D-Key
+    key(:,1:2)=key(:,1:2)+1;
+end
+if(any(key(:,3)==0))
+    key(:,3)=key(:,3)+1;
+end
 valid=false(size(key,1),1);
 for k=1:size(key,1)
     valid(k)=key(k,1)<=size(mask,1)&&key(k,2)<=size(mask,2)&&mask(key(k,1),key(k,2))==1;
@@ -790,6 +813,12 @@ end
 lambda=[];
 if(isfield(fNIR.info,'curWv'))
     lambda=fNIR.info.curWv(~isnan(fNIR.info.curWv));
+end
+if(isempty(lambda)&&numWv==2)
+    % Aurora headers do not list the wavelengths; NIRx devices use 760/850 nm
+    lambda=[760 850];
+    warning('pf2:importNIRX:defaultWavelengths', ...
+        'The .hdr of %s lists no wavelengths; using 760 and 850 nm.',root);
 end
 if(numel(lambda)~=numWv)
     error('pf2:importNIRX:wavelengthCount', ...
@@ -814,7 +843,7 @@ function markers=readEvt(fname,fs)
 markers=[];
 frames=[];
 codes=[];
-lines=splitlines(fileread(fname));
+lines=regexp(fileread(fname),'\r\n|\n|\r','split');
 for k=1:numel(lines)
     v=sscanf(lines{k},'%d')';
     if(numel(v)<2)
@@ -885,7 +914,7 @@ if(~isfile(fname))
     return;
 end
 names={'nz','Nz';'iz','Iz';'al','LPA';'ar','RPA';'cz','Cz'};
-lines=splitlines(fileread(fname));
+lines=regexp(fileread(fname),'\r\n|\n|\r','split');
 for k=1:numel(lines)
     tok=regexp(lines{k},'^\s*([^:\s]+)\s*:\s*(\S+)\s+(\S+)\s+(\S+)','tokens','once');
     if(isempty(tok)||~isempty(regexp(tok{1},'^[sd]\d+$','once')))

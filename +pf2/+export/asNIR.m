@@ -228,7 +228,11 @@ else
     fprintf(fid,'Freq Code:\t	99999999.999999\n');
 end
 
- arr=pf2_base.markersToArray(fNIRstruct.markers);
+ mrkOut=pf2_base.normalizeMarkers(fNIRstruct.markers);
+ if(ismember('MarkerSource',mrkOut.Properties.VariableNames))
+     mrkOut.MarkerSource=[]; % import bookkeeping (which .mrk file), not a marker column
+ end
+ arr=pf2_base.markersToArray(mrkOut);
  numLines=size(arr,1);
  numCol=size(arr,2);
  for x=1:numLines

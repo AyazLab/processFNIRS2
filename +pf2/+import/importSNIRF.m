@@ -118,6 +118,7 @@ fNIR = [];
 metaDataTags = stripStruct(data.nirs.metaDataTags);
 
 % Handle markers/stimulus data
+filledGaps = zeros(0, 2);
 if isfield(data.nirs, 'stim') && ~isempty(data.nirs.stim)
     markerTable = pf2_base.normalizeMarkers([]);   % empty canonical table
     stimDict = cell(0, 2);                          % code->label from stim names
@@ -127,6 +128,13 @@ if isfield(data.nirs, 'stim') && ~isempty(data.nirs.stim)
         curStim = stimArray(m);
 
         if ~isfield(curStim, 'data') || isempty(curStim.data)
+            continue;
+        end
+        % Gaps that pf2.export.asSNIRF marked (and filled when short): keep
+        % the intervals to drop any filled samples, not as markers
+        if (isfield(metaDataTags, 'GapStim') || isfield(metaDataTags, 'FilledGapSamples')) && isfield(curStim, 'name') ...
+                && strcmp(strtrim(char(string(curStim.name))), 'BAD_gap')
+            filledGaps = [filledGaps; double(curStim.data(:, 1:2))]; %#ok<AGROW>
             continue;
         end
 
@@ -242,8 +250,26 @@ if isfield(data, 'time')
     % Ensure time is a column vector [T x 1]
     fNIR.time = data.time(:);
     
-    % Calculate sampling rate from time data
-    fNIR.fs = 1/nanmedian(diff(fNIR.time));
+    % Drop samples that pf2.export.asSNIRF filled inside gaps
+    if ~isempty(filledGaps)
+        inGap = false(size(fNIR.time));
+        for g = 1:size(filledGaps, 1)
+            inGap = inGap | (fNIR.time > filledGaps(g, 1) + 1e-9 & ...
+                fNIR.time < filledGaps(g, 1) + filledGaps(g, 2) - 1e-9);
+        end
+        fNIR.time(inGap) = [];
+        fNIR.raw(inGap, :) = [];
+    end
+
+    % Sampling rate: the SamplingRate tag when present (a counter-timed or
+    % gap-filled recording), else from the time data
+    fNIR.fs = NaN;
+    if isfield(metaDataTags, 'SamplingRate')
+        fNIR.fs = str2double(string(metaDataTags.SamplingRate));
+    end
+    if ~isfinite(fNIR.fs) || fNIR.fs <= 0
+        fNIR.fs = 1/nanmedian(diff(fNIR.time));
+    end
 else
     % Create time vector if not available
     warning('No time data found. Creating time vector with default sampling rate.');
@@ -322,6 +348,14 @@ if scaleFactor ~= 1
     end
 end
 
+% Optode labels may load as a char matrix (fixed-width strings), a string
+% array or a cellstr; use a column cellstr
+for lblField = {'sourceLabels', 'detectorLabels'}
+    if isfield(probeInfo, lblField{1})
+        probeInfo.(lblField{1}) = toLabelCell(probeInfo.(lblField{1}));
+    end
+end
+
 % Handle timestamp data
 if isfield(metaDataTags, 'UnixTime')
     unixTime = str2double(metaDataTags.UnixTime);
@@ -380,6 +414,22 @@ elseif isfield(metaDataTags, 'MeasurementTime') && isfield(metaDataTags, 'Measur
     end
 end
 
+% pf2.export.asSNIRF writes time from 0 at the first sample and keeps the
+% original time of that sample in TimeOrigin; MeasurementTime describes the
+% first sample. Restore the original time base.
+if isfield(metaDataTags, 'TimeOrigin')
+    tOrigin = str2double(string(metaDataTags.TimeOrigin));
+    if isfinite(tOrigin) && tOrigin ~= 0
+        fNIR.time = fNIR.time + tOrigin;
+        if istable(fNIR.markers) && height(fNIR.markers) > 0
+            fNIR.markers.Time = fNIR.markers.Time + tOrigin;
+        end
+        if isfield(fNIR, 't0') && isdatetime(fNIR.t0)
+            fNIR.t0 = fNIR.t0 - seconds(tOrigin);
+        end
+    end
+end
+
 % Set up device info for fNIR structure
 device.cfg = pf2_base.external.INI();
 device.Info.CfgName = 'generated SNIRF file';
@@ -402,6 +452,9 @@ device.Info.DefaultSamplingRate = fNIR.fs;
 device.Info.MaxSamplingRate = fNIR.fs;
 device.Info.NumberProbes = 1;
 device.Info.RawMax = nanmax(nanmax(fNIR.raw));
+if isfield(metaDataTags, 'RawMax') && isfinite(str2double(string(metaDataTags.RawMax)))
+    device.Info.RawMax = str2double(string(metaDataTags.RawMax));
+end
 device.Info.RawMin = nanmin(nanmin(fNIR.raw));
 device.Info.NumberChannels = 0;
 
@@ -534,6 +587,14 @@ for p = 1:1 % Just one probe for now
     device.Probe{p}.DetPos.x = device.Probe{p}.DetPosX(:);
     device.Probe{p}.DetPos.y = device.Probe{p}.DetPosY(:);
     device.Probe{p}.DetPos.z = device.Probe{p}.DetPosZ(:);
+    % Optode labels (e.g. 10-10 positions) as table columns, which
+    % pf2.export.asSNIRF writes back
+    if isfield(probeInfo, 'sourceLabels') && numel(probeInfo.sourceLabels) == height(device.Probe{p}.SrcPos)
+        device.Probe{p}.SrcPos.Label = probeInfo.sourceLabels(:);
+    end
+    if isfield(probeInfo, 'detectorLabels') && numel(probeInfo.detectorLabels) == height(device.Probe{p}.DetPos)
+        device.Probe{p}.DetPos.Label = probeInfo.detectorLabels(:);
+    end
     
     % Initialize channel labels
     device.Probe{p}.TableCh.Label(:) = "";
@@ -828,6 +889,11 @@ if isfield(probeInfo, 'landmarkPos3D') && isfield(probeInfo, 'landmarkLabels')
             end
         end
         landmarks.Type = categorical(landmarkType);
+        % Also on the probe, where pf2.export.asSNIRF writes them from
+        for pp = 1:numel(device.Probe)
+            device.Probe{pp}.landmarkPos3D = landmarkPos(:, 1:3);
+            device.Probe{pp}.landmarkLabels = landmarkLabels(:);
+        end
     end
 end
 
@@ -861,11 +927,27 @@ if isfield(nirs, 'aux') && ~isempty(nirs.aux)
             fNIR.Aux.(fieldName).unit = auxItem.dataUnit;
         end
     end
+    % Aux times follow the restored time origin (see TimeOrigin above)
+    if exist('tOrigin', 'var') && isfinite(tOrigin) && tOrigin ~= 0
+        auxNames = fieldnames(fNIR.Aux);
+        for ai = 1:numel(auxNames)
+            fNIR.Aux.(auxNames{ai}).time = fNIR.Aux.(auxNames{ai}).time + tOrigin;
+        end
+    end
 end
 
 % Set channel quality mask (one per optode pair, all good by default)
 fNIR.fchMask = ones(1, device.Info.NumberChannels);
 
+
+% Keep the coordinate system in the device information as well, where
+% pf2.export.asSNIRF reads it on re-export
+if ~isempty(coordSys) && ~strcmpi(coordSys, 'Unknown')
+    device.Info.CoordinateSystem = char(coordSys);
+    if ~isempty(coordSysDesc)
+        device.Info.CoordinateSystemDescription = char(coordSysDesc);
+    end
+end
 
 % Save probe info
 if isfield(fNIR, 'probeinfo')
@@ -1225,4 +1307,19 @@ catch e
     coordSysInfo = [];
 end
 
+end
+
+
+function c = toLabelCell(v)
+% TOLABELCELL Labels as a trimmed column cellstr
+if ischar(v)
+    c = cellstr(v);
+elseif isstring(v)
+    c = cellstr(v(:));
+elseif iscell(v)
+    c = cellfun(@(x) char(string(x)), v(:), 'UniformOutput', false);
+else
+    c = {};
+end
+c = strtrim(c(:));
 end

@@ -192,8 +192,9 @@ else
    error('pf2_base:pf2_updateCurrentDevice:notImplemented', 'Not Yet Implemented for seperate probe data,\nAssumes concatenated datasets with unique channels in the config file'); 
 end
 
-% A counter time base (COBI .nir) has its rate from the fitted counter tick
-if(isfield(fData,'fs')&&isfield(fData,'info')&&isstruct(fData.info)&&isfield(fData.info,'timebase')&&isfield(fData.info.timebase,'fs'))
+% A counter time base (COBI .nir) has its rate from the fitted counter
+% tick, while the time vector is still the one it was computed for
+if(isfield(fData,'fs')&&isfield(fData,'time')&&pf2_base.timebaseMatches(fData,fData.time))
     fData.fs=fData.info.timebase.fs;
 end
 end
