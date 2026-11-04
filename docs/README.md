@@ -24,7 +24,7 @@ below. Runnable tutorials live in
 
 If you use processFNIRS2 in your research, please cite it:
 
-> Curtin, A., & Ayaz, H. (2026). *processFNIRS2* (Version v1.2.1) [Computer
+> Curtin, A., & Ayaz, H. (2026). *processFNIRS2* (Version v1.2.2) [Computer
 > software]. Zenodo. https://doi.org/10.5281/zenodo.23348858
 
 See [Citing processFNIRS2](CITING.md) for BibTeX and for choosing between the

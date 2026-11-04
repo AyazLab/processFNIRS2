@@ -99,6 +99,24 @@ classdef ExportTest < matlab.unittest.TestCase
             testCase.TempFiles{end+1} = filepath;
         end
 
+        function names = stimNames(~, filepath)
+            % STIMNAMES Names of the stim groups in a SNIRF file
+            info = h5info(filepath, '/nirs');
+            names = {};
+            for g = {info.Groups.Name}
+                if contains(g{1}, 'stim')
+                    names{end+1} = char(h5read(filepath, [g{1} '/name'])); %#ok<AGROW>
+                end
+            end
+        end
+
+        function writeText(~, fname, txt)
+            % WRITETEXT Write a text fixture file
+            fid = fopen(fname, 'w');
+            fprintf(fid, '%s', txt);
+            fclose(fid);
+        end
+
         function cleanupRelatedFiles(testCase, basePath)
             % CLEANUPRELATEDFILES Clean up all files with same base name
             %
@@ -473,6 +491,7 @@ classdef ExportTest < matlab.unittest.TestCase
         function testExportSNIRFTimeZoneOption(testCase)
             % A zoneless t0 takes its zone from the TimeZone option
             data = testCase.RawData;
+            data.time = data.time - data.time(1);   % first sample at t0
             data.t0 = datetime(2014, 5, 19, 10, 22, 45);
             filepath = testCase.createTempPath('.snirf');
             pf2.export.asSNIRF(data, filepath, 'TimeZone', 'America/New_York');
@@ -480,15 +499,40 @@ classdef ExportTest < matlab.unittest.TestCase
             unixTime = str2double(h5read(filepath, '/nirs/metaDataTags/UnixTime'));
             expected = posixtime(datetime(2014, 5, 19, 14, 22, 45, 'TimeZone', 'UTC'));
             testCase.verifyEqual(unixTime, expected, 'AbsTol', 1e-3);
+            % Written in UTC (readers such as MNE drop the offset)
             testCase.verifyEqual(char(h5read(filepath, '/nirs/metaDataTags/MeasurementTime')), ...
-                '10:22:45.000-04:00');
+                '14:22:45.000+00:00');
             testCase.verifyEqual(char(h5read(filepath, '/nirs/metaDataTags/MeasurementDate')), ...
                 '2014-05-19');
+            testCase.verifyEqual(char(h5read(filepath, '/nirs/metaDataTags/MeasurementTimeZone')), ...
+                'America/New_York');
+
+            % Reimport gives the same instant in the recording's zone
+            reimported = pf2.import.importSNIRF(filepath, false);
+            testCase.verifyEqual(reimported.t0.TimeZone, 'America/New_York');
+            testCase.verifyLessThan(abs(seconds(reimported.t0 - ...
+                datetime(2014, 5, 19, 10, 22, 45, 'TimeZone', 'America/New_York'))), 1e-3);
+        end
+
+        function testImportSNIRFZonelessTimeStaysZoneless(testCase)
+            % Without UnixTime or a zone, reimported t0 is the wall-clock time
+            % with no zone (never this machine's)
+            data = testCase.RawData;
+            data.t0 = datetime(2014, 5, 19, 10, 22, 45);
+            filepath = testCase.createTempPath('.snirf');
+            prev = warning('off', 'pf2:asSNIRF:noTimeZone');
+            testCase.addTeardown(@() warning(prev));
+            pf2.export.asSNIRF(data, filepath);
+
+            reimported = pf2.import.importSNIRF(filepath, false);
+            testCase.verifyEmpty(reimported.t0.TimeZone);
+            testCase.verifyLessThan(abs(seconds(reimported.t0 - data.t0)), 1e-3);
         end
 
         function testExportSNIRFNoTimeZoneOmitsUnixTime(testCase)
             % Without a zone, no absolute time is written and none is guessed
             data = testCase.RawData;
+            data.time = data.time - data.time(1);   % first sample at t0
             data.t0 = datetime(2014, 5, 19, 10, 22, 45);
             filepath = testCase.createTempPath('.snirf');
             prev = warning('on', 'pf2:asSNIRF:noTimeZone'); % other tests may leave warnings off
@@ -513,6 +557,310 @@ classdef ExportTest < matlab.unittest.TestCase
 
             info = h5info(filepath, '/nirs/metaDataTags');
             testCase.verifyFalse(ismember('MeasurementDate', {info.Datasets.Name}));
+        end
+
+        function testExportSNIRFTimeOrigin(testCase)
+            % Time is written from 0 at the first sample; TimeOrigin keeps
+            % the original time of that sample, MeasurementTime describes it,
+            % and importSNIRF restores the original time base
+            data = testCase.RawData;
+            data.time = data.time - data.time(1) + 12.5;
+            data.t0 = datetime(2014, 5, 19, 10, 22, 45);
+            filepath = testCase.createTempPath('.snirf');
+            pf2.export.asSNIRF(data, filepath, 'TimeZone', 'UTC');
+
+            t = h5read(filepath, '/nirs/data1/time');
+            testCase.verifyEqual(t(1), 0);
+            testCase.verifyEqual(str2double(h5read(filepath, '/nirs/metaDataTags/TimeOrigin')), 12.5, 'AbsTol', 1e-6);
+            testCase.verifyEqual(char(h5read(filepath, '/nirs/metaDataTags/MeasurementTime')), ...
+                '10:22:57.500+00:00');
+            if ~isempty(data.markers)
+                stim = h5read(filepath, '/nirs/stim1/data');
+                testCase.verifyEqual(stim(1, 1), data.markers.Time(find(data.markers.Code == ...
+                    data.markers.Code(1), 1)) - 12.5, 'AbsTol', 1e-9);
+            end
+
+            reimported = pf2.import.importSNIRF(filepath, false);
+            testCase.verifyEqual(reimported.time, data.time, 'AbsTol', 1e-9);
+            testCase.verifyLessThan(abs(seconds(reimported.t0 - ...
+                datetime(2014, 5, 19, 10, 22, 45, 'TimeZone', 'UTC'))), 1e-3);
+            testCase.verifyEqual(reimported.markers.Time, data.markers.Time, 'AbsTol', 1e-9);
+        end
+
+        function testExportSNIRFGapsMarkedNotFilled(testCase)
+            % By default a gap of more than one missing sample is written as
+            % recorded, marked by a BAD_gap stim and warned about; a single
+            % missing sample is filled
+            data = testCase.RawData;
+            n = numel(data.time);
+            cut = round(n / 2);
+            data.time(cut+1:end) = data.time(cut+1:end) + 7.3;   % 7.3 s gap
+            filepath = testCase.createTempPath('.snirf');
+            prev = warning('on', 'pf2:asSNIRF:unfilledGaps');   % other tests may leave warnings off
+            testCase.addTeardown(@() warning(prev));
+            testCase.verifyWarning(@() pf2.export.asSNIRF(data, filepath, 'TimeZone', 'UTC'), ...
+                'pf2:asSNIRF:unfilledGaps');
+            t = h5read(filepath, '/nirs/data1/time');
+            testCase.verifyEqual(numel(t), n, 'A long gap should not be filled');
+            testCase.verifyEqual(str2double(h5read(filepath, '/nirs/metaDataTags/FilledGapSamples')), 0);
+            testCase.verifyTrue(ismember('BAD_gap', testCase.stimNames(filepath)));
+            reimported = pf2.import.importSNIRF(filepath, false);
+            testCase.verifyEqual(reimported.time, data.time, 'AbsTol', 1e-6);
+            testCase.verifyEqual(height(reimported.markers), height(data.markers), ...
+                'BAD_gap stims should not become markers');
+
+            % One missing sample is filled
+            one = testCase.RawData;
+            one.time(cut+1:end) = one.time(cut+1:end) + 1 / one.fs;
+            filepath2 = testCase.createTempPath('.snirf');
+            testCase.verifyWarningFree(@() pf2.export.asSNIRF(one, filepath2, 'TimeZone', 'UTC'));
+            testCase.verifyEqual(numel(h5read(filepath2, '/nirs/data1/time')), n + 1);
+            testCase.verifyLessThan(max(diff(h5read(filepath2, '/nirs/data1/time'))), 1.5 / one.fs);
+            reimported = pf2.import.importSNIRF(filepath2, false);
+            testCase.verifyEqual(reimported.time, one.time, 'AbsTol', 1e-6);
+        end
+
+        function testExportSNIRFFillsGapsOnRequest(testCase)
+            % With MaxFillSamples Inf a long gap is filled on the sample
+            % grid; importSNIRF drops the filled samples again
+            data = testCase.RawData;
+            n = numel(data.time);
+            cut = round(n / 2);
+            data.time(cut+1:end) = data.time(cut+1:end) + 7.3;
+            filepath = testCase.createTempPath('.snirf');
+            pf2.export.asSNIRF(data, filepath, 'TimeZone', 'UTC', 'MaxFillSamples', Inf);
+            t = h5read(filepath, '/nirs/data1/time');
+            testCase.verifyLessThan(max(diff(t)), 1.5 / data.fs, 'Written samples should be on a uniform grid');
+            nFilled = str2double(h5read(filepath, '/nirs/metaDataTags/FilledGapSamples'));
+            testCase.verifyEqual(numel(t), n + nFilled);
+            testCase.verifyEqual(nFilled, round(7.3 * data.fs), 'AbsTol', 1);
+            testCase.verifyTrue(ismember('BAD_gap', testCase.stimNames(filepath)));
+            reimported = pf2.import.importSNIRF(filepath, false);
+            testCase.verifyEqual(numel(reimported.time), n);
+            testCase.verifyEqual(reimported.time, data.time, 'AbsTol', 1e-6);
+            testCase.verifyEqual(height(reimported.markers), height(data.markers));
+        end
+
+        function testExportSNIRFTargetMNE(testCase)
+            % Target 'mne' fills every gap unless MaxFillSamples is given,
+            % and warns about irregular sample steps
+            data = testCase.RawData;
+            n = numel(data.time);
+            cut = round(n / 2);
+            data.time(cut+1:end) = data.time(cut+1:end) + 7.3;
+            filepath = testCase.createTempPath('.snirf');
+            pf2.export.asSNIRF(data, filepath, 'TimeZone', 'UTC', 'Target', 'mne');
+            t = h5read(filepath, '/nirs/data1/time');
+            testCase.verifyLessThan(max(diff(t)), 1.5 / data.fs);
+            testCase.verifyGreaterThan(numel(t), n + 60);
+
+            filepath2 = testCase.createTempPath('.snirf');
+            prev = warning('off', 'pf2:asSNIRF:unfilledGaps');
+            testCase.addTeardown(@() warning(prev));
+            pf2.export.asSNIRF(data, filepath2, 'TimeZone', 'UTC', 'Target', 'mne', 'MaxFillSamples', 0);
+            testCase.verifyEqual(numel(h5read(filepath2, '/nirs/data1/time')), n, ...
+                'An explicit MaxFillSamples overrides the preset');
+
+            irregular = testCase.RawData;
+            prevRng = rng;
+            testCase.addTeardown(@() rng(prevRng));
+            rng(5);
+            irregular.time = irregular.time(1) + cumsum([0; 0.1 * (0.85 + 0.3 * rand(n - 1, 1))]);
+            filepath3 = testCase.createTempPath('.snirf');
+            prevIrr = warning('on', 'pf2:asSNIRF:irregularForMNE');
+            testCase.addTeardown(@() warning(prevIrr));
+            testCase.verifyWarning(@() pf2.export.asSNIRF(irregular, filepath3, 'TimeZone', 'UTC', ...
+                'Target', 'mne', 'MaxFillSamples', 0), 'pf2:asSNIRF:irregularForMNE');
+        end
+
+        function testImportNIRxIgnoresSimilarRecording(testCase)
+            % rec.hdr and rec_2.hdr in one folder: importing rec.hdr reads
+            % only rec's files
+            folder = tempname;
+            mkdir(folder);
+            testCase.addTeardown(@() rmdir(folder, 's'));
+            for k = 1:2
+                if k == 1, root = 'rec'; else, root = 'rec_2'; end
+                fid = fopen(fullfile(folder, [root '.hdr']), 'w');
+                fprintf(fid, '[GeneralInfo]\nDate="Wed, 01 Jan 2020"\nTime="1%d:00:00.000"\n\n[ImagingParameters]\nSamplingRate=7.812500\n', k - 1);
+                fclose(fid);
+                t = (0:99)' / 7.8125; %#ok<NASGU>
+                SD.Lambda = [760 850];
+                SD.SpatialUnit = 'mm';
+                SD.SrcPos = [0 0 0; 60 0 0; 30 30 5];
+                SD.DetPos = [30 0 0; 0 30 5; 60 30 5; 38 30 5];
+                sd = [1 1; 2 1; 1 2; 3 2; 3 3; 3 4];
+                SD.MeasList = [sd ones(6, 1) ones(6, 1); sd ones(6, 1) 2 * ones(6, 1)]; %#ok<STRNU>
+                d = k * 1000 + ones(100, 12); %#ok<NASGU>
+                s = zeros(100, 1); %#ok<NASGU>
+                aux = zeros(100, 1); %#ok<NASGU>
+                save(fullfile(folder, [root '.nirs']), 't', 'd', 's', 'SD', 'aux');
+            end
+            data = pf2.import.importNIRX(fullfile(folder, 'rec.hdr'), false);
+            testCase.verifyEqual(data.raw(1, 1), 1001);
+            testCase.verifyEqual(hour(data.t0), 10);
+        end
+
+        function testExportSNIRFFillAllIgnoresWholeSteps(testCase)
+            % MaxFillSamples Inf also fills a gap that is not a whole number
+            % of sample periods
+            data = testCase.RawData;
+            n = numel(data.time);
+            cut = round(n / 2);
+            data.time(cut+1:end) = data.time(cut+1:end) + 0.16;   % 0.26 s step at 10 Hz
+            filepath = testCase.createTempPath('.snirf');
+            testCase.verifyWarningFree(@() pf2.export.asSNIRF(data, filepath, 'TimeZone', 'UTC', 'MaxFillSamples', Inf));
+            testCase.verifyEqual(numel(h5read(filepath, '/nirs/data1/time')), n + 2);
+        end
+
+        function testImportSNIRFRateSurvivesProcessing(testCase)
+            % The SamplingRate tag survives device setup in processFNIRS2
+            % when the median step differs from 1/fs (as on a counter-timed
+            % 2000M), and gives way after resampling
+            data = testCase.RawData;
+            n = numel(data.time);
+            steps = repmat([0.1010; 0.1010; 0.0990], ceil(n / 3), 1);
+            data.time = data.time(1) + [0; cumsum(steps(1:n-1))];
+            data.fs = 1 / mean(diff(data.time));
+            data.info = rmfield(data.info, intersect(fieldnames(data.info), {'timebase'}));
+            filepath = testCase.createTempPath('.snirf');
+            pf2.export.asSNIRF(data, filepath, 'TimeZone', 'UTC');
+            reimported = pf2.import.importSNIRF(filepath, false);
+            testCase.verifyEqual(reimported.fs, data.fs, 'RelTol', 1e-9);
+            processed = processFNIRS2(reimported);
+            testCase.verifyEqual(processed.fs, data.fs, 'RelTol', 1e-9);
+            testCase.verifyNotEqual(processed.fs, 1 / median(diff(data.time)));
+        end
+
+        function testImportSNIRFAuxWithoutTime(testCase)
+            % An aux signal without its own time inherits the restored data
+            % time once, not with the time origin added twice
+            data = testCase.RawData;
+            data.time = data.time - data.time(1) + 12.5;
+            data.Aux.heartRate.data = 60 + randn(numel(data.time), 1);
+            data.Aux.heartRate.time = data.time;
+            data.Aux.heartRate.unit = 'bpm';
+            filepath = testCase.createTempPath('.snirf');
+            pf2.export.asSNIRF(data, filepath, 'TimeZone', 'UTC');
+            fid = H5F.open(filepath, 'H5F_ACC_RDWR', 'H5P_DEFAULT');
+            H5L.delete(fid, '/nirs/aux1/time', 'H5P_DEFAULT');
+            H5F.close(fid);
+            reimported = pf2.import.importSNIRF(filepath, false);
+            testCase.verifyEqual(reimported.Aux.heartRate.time(:), reimported.time(:));
+            testCase.verifyEqual(reimported.time(1), 12.5, 'AbsTol', 1e-9);
+        end
+
+        function testImportSNIRFLabelsOnePerColumn(testCase)
+            % Fixed-width labels stored one per column are read per column
+            labels = ["S01" "S02" "S03" "S04"];
+            data = testCase.RawData;
+            filepath = testCase.createTempPath('.snirf');
+            pf2.export.asSNIRF(data, filepath, 'TimeZone', 'UTC');
+            nSrc = size(h5read(filepath, '/nirs/probe/sourcePos3D'), 2);
+            testCase.assumeEqual(nSrc, numel(labels));
+            fid = H5F.open(filepath, 'H5F_ACC_RDWR', 'H5P_DEFAULT');
+            if H5L.exists(fid, '/nirs/probe/sourceLabels', 'H5P_DEFAULT')
+                H5L.delete(fid, '/nirs/probe/sourceLabels', 'H5P_DEFAULT');
+            end
+            type = H5T.copy('H5T_C_S1');
+            H5T.set_size(type, 3);
+            space = H5S.create_simple(1, numel(labels), numel(labels));
+            dset = H5D.create(fid, '/nirs/probe/sourceLabels', type, space, 'H5P_DEFAULT');
+            H5D.write(dset, 'H5ML_DEFAULT', 'H5S_ALL', 'H5S_ALL', 'H5P_DEFAULT', char(labels(:))');
+            H5D.close(dset); H5S.close(space); H5T.close(type); H5F.close(fid);
+            reimported = pf2.import.importSNIRF(filepath, false);
+            testCase.verifyEqual(string(reimported.probeinfo.Probe{1}.SrcPos.Label)', labels);
+        end
+
+        function testEventsTsvOriginMatchesSNIRF(testCase)
+            % With a time vector that does not match the data, events.tsv
+            % uses origin 0, as asSNIRF does
+            data = testCase.RawData;
+            data.time = data.time(1:end-1) + 12.5;   % one sample short
+            data.markers = pf2_base.normalizeMarkers([30, 1, 0, 1]);
+            tsv = testCase.createTempPath('.tsv');
+            pf2_base.bids.writeEventsTsv(tsv, data);
+            T = readtable(tsv, 'FileType', 'text', 'Delimiter', '\t');
+            testCase.verifyEqual(T.onset(1), 30, 'AbsTol', 1e-9);
+        end
+
+        function testExportSNIRFGapsInMNE(testCase)
+            % A recording exported with Target 'mne' opens in MNE with the
+            % gap as a BAD annotation and a marker after the gap on its own
+            % sample. Skipped when Python with MNE is not available.
+            [status, ~] = system('python3 -c "import mne, h5py"');
+            testCase.assumeEqual(status, 0, 'Python with mne and h5py is not available');
+            data = testCase.RawData;
+            n = numel(data.time);
+            cut = round(n / 2);
+            data.time(cut+1:end) = data.time(cut+1:end) + 7.3;
+            data.markers = pf2_base.normalizeMarkers([data.time(cut + 200), 77, 0, 1]);
+            filepath = testCase.createTempPath('.snirf');
+            pf2.export.asSNIRF(data, filepath, 'TimeZone', 'UTC', 'Target', 'mne');
+            nFilled = str2double(h5read(filepath, '/nirs/metaDataTags/FilledGapSamples'));
+
+            script = [tempname '.py'];
+            testCase.TempFiles{end+1} = script;
+            fid = fopen(script, 'w');
+            closeScript = onCleanup(@() fclose(fid));
+            fprintf(fid, ['import sys, warnings, mne\n' ...
+                'warnings.simplefilter("ignore")\n' ...
+                'r = mne.io.read_raw_snirf(sys.argv[1], verbose="error")\n' ...
+                'a = r.annotations\n' ...
+                'print(int(round(a.onset[a.description == "marker77"][0] * r.info["sfreq"])), ' ...
+                'int((a.description == "BAD_gap").sum()))\n']);
+            clear closeScript
+            [status, out] = system(sprintf('python3 "%s" "%s"', script, filepath));
+            testCase.assertEqual(status, 0, out);
+            vals = sscanf(strtrim(out), '%d');
+            % Written sample index (0-based) of the marker: its original
+            % index plus the samples filled before it
+            testCase.verifyEqual(vals(1), (cut + 200 - 1) + nFilled);
+            testCase.verifyEqual(vals(2), 1);
+        end
+
+        function testExportSNIRFMeasurementListTypes(testCase)
+            % Index and type fields are integers; no dataTypeLabel or
+            % dataUnit for raw data (MNE >= 1.13 rejects dataUnit 'au')
+            filepath = testCase.createTempPath('.snirf');
+            pf2.export.asSNIRF(testCase.RawData, filepath, 'TimeZone', 'UTC');
+
+            ml = h5info(filepath, '/nirs/data1/measurementList1');
+            names = {ml.Datasets.Name};
+            testCase.verifyFalse(any(ismember({'dataTypeLabel', 'dataUnit'}, names)));
+            for f = {'dataType', 'dataTypeIndex', 'sourceIndex', 'detectorIndex', 'wavelengthIndex'}
+                v = h5read(filepath, ['/nirs/data1/measurementList1/' f{1}]);
+                testCase.verifyClass(v, 'int32', [f{1} ' should be stored as an integer']);
+            end
+
+            % Reimport reads the integers back as doubles
+            reimported = pf2.import.importSNIRF(filepath, false);
+            testCase.verifyEqual(size(reimported.raw, 1), size(testCase.RawData.raw, 1));
+            testCase.verifyClass(reimported.probeinfo.Probe{1}.TableCh.SourceIndex, 'double');
+        end
+
+        function testExportSNIRFOmitsIdentifyingMetadata(testCase)
+            % Identifying .info fields are written only with
+            % IncludeIdentifying; paths are reduced to the file name
+            data = testCase.RawData;
+            data.info.Age = 59;
+            data.info.sex = 'F';
+            data.info.Experimenter = 'AB';
+            data.info.filename = '/Users/someone/study/raw/subject01.nir';
+            data.info.Group = 'Control';
+            filepath = testCase.createTempPath('.snirf');
+            pf2.export.asSNIRF(data, filepath, 'TimeZone', 'UTC');
+
+            tags = {h5info(filepath, '/nirs/metaDataTags').Datasets.Name};
+            testCase.verifyFalse(any(ismember({'Age', 'sex', 'Experimenter'}, tags)));
+            testCase.verifyEqual(char(h5read(filepath, '/nirs/metaDataTags/filename')), 'subject01.nir');
+            testCase.verifyEqual(char(h5read(filepath, '/nirs/metaDataTags/Group')), 'Control');
+
+            filepath2 = testCase.createTempPath('.snirf');
+            pf2.export.asSNIRF(data, filepath2, 'TimeZone', 'UTC', 'IncludeIdentifying', true);
+            tags = {h5info(filepath2, '/nirs/metaDataTags').Datasets.Name};
+            testCase.verifyTrue(all(ismember({'Age', 'sex', 'Experimenter'}, tags)));
+            testCase.verifyEqual(char(h5read(filepath2, '/nirs/metaDataTags/filename')), 'subject01.nir');
         end
 
         function testExportSNIRFOneDimensionalVectors(testCase)
@@ -551,7 +899,7 @@ classdef ExportTest < matlab.unittest.TestCase
             save(fullfile(folder, 'rec.nirs'), 't', 'd', 's', 'SD', 'aux');
 
             data = pf2.import.importNIRX(fullfile(folder, 'rec.hdr'), false);
-            testCase.verifyEqual(data.t0, datetime(2019, 3, 14, 14, 32, 17.312), 'AbsTol', seconds(1e-3));
+            testCase.verifyLessThan(abs(seconds(data.t0 - datetime(2019, 3, 14, 14, 32, 17.312))), 1e-3);
             testCase.verifyEqual(data.probeinfo.Info.Name, 'NIRSport2');
             testCase.verifyEqual(size(data.Aux.NIRx, 2), 1, 'All-zero aux column should be dropped');
             p = data.probeinfo.Probe{1};
@@ -575,9 +923,179 @@ classdef ExportTest < matlab.unittest.TestCase
             testCase.verifyEqual(char(h5read(filepath, '/nirs/metaDataTags/LengthUnit')), 'mm');
             testCase.verifyEqual(char(h5read(filepath, '/nirs/metaDataTags/Model')), 'NIRSport2');
             testCase.verifyEqual(char(h5read(filepath, '/nirs/metaDataTags/MeasurementDate')), '2019-03-14');
-            testCase.verifyEqual(char(h5read(filepath, '/nirs/metaDataTags/MeasurementTime')), '14:32:17.312+01:00');
+            testCase.verifyEqual(char(h5read(filepath, '/nirs/metaDataTags/MeasurementTime')), '13:32:17.312+00:00');
             srcPos = h5read(filepath, '/nirs/probe/sourcePos3D')';
             testCase.verifyEqual(srcPos, SD.SrcPos, 'AbsTol', 1e-6);
+        end
+
+        function testImportNIRxVendorGeometry(testCase)
+            % _probeInfo.mat, digpts.txt and the .roh (inside the .zip) give
+            % the vendor coordinates, labels, landmarks and start time
+            folder = tempname;
+            mkdir(folder);
+            testCase.addTeardown(@() rmdir(folder, 's'));
+            fid = fopen(fullfile(folder, 'rec_config.hdr'), 'w');
+            fprintf(fid, ['[GeneralInfo]\nDevice ID=ABCD_0001_X\n', ...
+                'Date=2023-05-02 09:15:10.250000\nSampling rate=8.138020833333334\n']);
+            fclose(fid);
+            t = (0:99)' / 8.138020833333334;
+            SD.Lambda = [760 850];
+            SD.SpatialUnit = 'mm';
+            % .nirs positions in a translated frame (as NIRx writes them)
+            src3 = [5.5 3.0 6.0; 3.0 -1.0 9.0; 8.0 -2.0 3.0];
+            det3 = [5.0 5.0 4.0; 3.5 3.0 7.5; 7.0 -4.0 6.0];
+            SD.SrcPos = src3 * 10 + [30 20 -10];
+            SD.DetPos = det3 * 10 + [30 20 -10];
+            sd = [1 1; 1 2; 2 2; 3 3; 2 3];
+            SD.MeasList = [sd ones(5, 1) ones(5, 1); sd ones(5, 1) 2 * ones(5, 1)];
+            d = rand(100, 10) + 1; %#ok<NASGU>
+            s = zeros(100, 1); s(10) = 1; %#ok<NASGU>
+            aux = zeros(100, 1); %#ok<NASGU>
+            save(fullfile(folder, 'rec.nirs'), 't', 'd', 's', 'SD', 'aux');
+            probeInfo.headmodel = 'ICBM152';
+            probeInfo.probes.coords_s3 = src3;
+            probeInfo.probes.coords_d3 = det3;
+            probeInfo.probes.coords_s2 = [0.10 0.50; 0.30 0.50; 0.50 0.50];
+            probeInfo.probes.coords_d2 = [0.20 0.70; 0.40 0.70; 0.60 0.30];
+            probeInfo.probes.labels_s = {'FC4', 'C2', 'C6'};
+            probeInfo.probes.labels_d = {'F4', 'FC2', 'FC6'};
+            save(fullfile(folder, 'rec_probeInfo.mat'), 'probeInfo');
+            fid = fopen(fullfile(folder, 'digpts.txt'), 'w');
+            fprintf(fid, ['nz: 0 85 -45\nar: 82 -18 -55\nal: -82 -18 -55\n', ...
+                'cz: 0 -10 100\niz: 0 -118 -25\ns1: 55 30 60\n']);
+            fclose(fid);
+            roh = fullfile(tempdir, 'rec.roh');
+            fid = fopen(roh, 'w');
+            fprintf(fid, '2023-05-02T09:15:11.125000;0;0;1;0;0.006;0.017\n2023-05-02T09:15:11.125000;0;0;1;1;0.029;0.058\n');
+            fclose(fid);
+            zip(fullfile(folder, 'rec.zip'), roh);
+            delete(roh);
+
+            data = pf2.import.importNIRX(fullfile(folder, 'rec_config.hdr'), false, 'Model', 'NIRSport2');
+            testCase.verifyLessThan(abs(seconds(data.t0 - datetime(2023, 5, 2, 9, 15, 11.125))), 1e-5, ...
+                't0 should be the first .roh frame');
+            testCase.verifyEqual(data.fs, 8.138020833333334, 'AbsTol', 1e-9);
+            testCase.verifyEqual(data.probeinfo.Info.Name, 'NIRSport2');
+            testCase.verifyEqual(char(data.device.CoordinateSystem), 'MNI');
+            testCase.verifyEqual(height(data.device.Landmarks), 5);
+
+            filepath = testCase.createTempPath('.snirf');
+            pf2.export.asSNIRF(data, filepath, 'TimeZone', 'America/New_York');
+            testCase.verifyEqual(h5read(filepath, '/nirs/probe/sourcePos3D')', src3 * 10, 'AbsTol', 1e-9);
+            testCase.verifyEqual(h5read(filepath, '/nirs/probe/detectorPos3D')', det3 * 10, 'AbsTol', 1e-9);
+            testCase.verifyEqual(h5read(filepath, '/nirs/probe/sourcePos2D')', probeInfo.probes.coords_s2 * 10, 'AbsTol', 1e-9);
+            testCase.verifyEqual(string(h5read(filepath, '/nirs/probe/sourceLabels'))', string(probeInfo.probes.labels_s));
+            testCase.verifyEqual(string(h5read(filepath, '/nirs/probe/detectorLabels'))', string(probeInfo.probes.labels_d));
+            testCase.verifyEqual(string(h5read(filepath, '/nirs/probe/landmarkLabels'))', ["Nz" "Iz" "LPA" "RPA" "Cz"]);
+            lm = h5read(filepath, '/nirs/probe/landmarkPos3D')';
+            testCase.verifyEqual(lm(3, :), [-82 -18 -55 3], 'AbsTol', 1e-9);
+            % 'MNI' is not a BIDS/SNIRF coordinate system: it is kept in the
+            % metadata and probe/coordinateSystem is not written
+            probeNames = {h5info(filepath, '/nirs/probe').Datasets.Name};
+            testCase.verifyFalse(ismember('coordinateSystem', probeNames));
+            testCase.verifyEqual(char(h5read(filepath, '/nirs/metaDataTags/CoordinateSystem')), 'MNI');
+            testCase.verifyTrue(contains(string(h5read(filepath, '/nirs/metaDataTags/CoordinateSystemDescription')), 'ICBM152'));
+            testCase.verifyEqual(char(h5read(filepath, '/nirs/metaDataTags/MeasurementTime')), '13:15:11.125+00:00');
+
+            reimported = pf2.import.importSNIRF(filepath, false);
+            testCase.verifyEqual(char(reimported.device.CoordinateSystem), 'MNI');
+            testCase.verifyEqual(height(reimported.device.Landmarks), 5);
+
+            % Re-export keeps the optode labels and landmarks
+            filepath2 = testCase.createTempPath('.snirf');
+            pf2.export.asSNIRF(reimported, filepath2, 'TimeZone', 'UTC');
+            testCase.verifyEqual(string(h5read(filepath2, '/nirs/probe/sourceLabels'))', string(probeInfo.probes.labels_s));
+            testCase.verifyEqual(string(h5read(filepath2, '/nirs/probe/detectorLabels'))', string(probeInfo.probes.labels_d));
+            testCase.verifyEqual(string(h5read(filepath2, '/nirs/probe/landmarkLabels'))', ["Nz" "Iz" "LPA" "RPA" "Cz"]);
+
+            % Target 'mne' leaves the landmarks out (MNE 1.13 misreads them)
+            filepath3 = testCase.createTempPath('.snirf');
+            pf2.export.asSNIRF(reimported, filepath3, 'TimeZone', 'UTC', 'Target', 'mne');
+            probeNames = {h5info(filepath3, '/nirs/probe').Datasets.Name};
+            testCase.verifyFalse(any(ismember({'landmarkPos3D', 'landmarkLabels'}, probeNames)));
+            testCase.verifyTrue(ismember('sourceLabels', probeNames));
+        end
+
+        function testImportNIRStarWavelengthFiles(testCase)
+            % A NIRStar recording without a .nirs file: channels from the
+            % .hdr S-D-Key/S-D-Mask, data from .wl1/.wl2, geometry from
+            % _probeInfo.mat, markers from the .hdr Events or the .evt file
+            folder = tempname;
+            mkdir(folder);
+            testCase.addTeardown(@() rmdir(folder, 's'));
+            root = fullfile(folder, 'NIRS-2020-01-01_001');
+            writeHdr = @(events) testCase.writeText([root '.hdr'], sprintf([ ...
+                '[GeneralInfo]\nFileName="NIRS-2020-01-01_001"\nDate="Wed, 01 Jan 2020"\n', ...
+                'Time="10:00:00.000"\nDevice="NIRSport 8x8 Tandem"\n\n', ...
+                '[ImagingParameters]\nSources=2\nDetectors=3\nWavelengths="760\t850"\n', ...
+                'SamplingRate=7.812500\n\n[Markers]\nEvents="#\n%s#"\n\n', ...
+                '[DataStructure]\nS-D-Key="1-1:1,1-2:2,1-3:3,2-1:4,2-2:5,2-3:6,"\n', ...
+                'S-D-Mask="#\n1\t1\t0\n0\t1\t0\n#"\n'], events));
+            writeHdr(sprintf('12.800\t3\t100\n'));
+            nSamples = 50;
+            wl1 = (1:nSamples)' + (1:6) / 10;   % column k holds k/10 offsets
+            wl2 = wl1 + 100;
+            writematrix(wl1, [root '.wl1'], 'Delimiter', ' ', 'FileType', 'text');
+            writematrix(wl2, [root '.wl2'], 'Delimiter', ' ', 'FileType', 'text');
+            % Vendor geometry lists all 3 detectors; detector 3 is unused
+            probeInfo.probes.coords_s3 = [0 0 8; 3 0 7.5];
+            probeInfo.probes.coords_d3 = [3 0 8; 0 3 7.5; 6 6 6];
+            probeInfo.probes.coords_s2 = [0 0; 0.3 0];
+            probeInfo.probes.coords_d2 = [0.3 0.1; 0 0.3; 0.6 0.6];
+            save([root '_probeInfo.mat'], 'probeInfo');
+
+            data = pf2.import.importNIRX([root '.hdr'], false);
+            % Mask keeps 1-1, 1-2, 2-2 (key columns 1, 2, 5) for each wavelength
+            testCase.verifyEqual(size(data.raw), [nSamples 6]);
+            testCase.verifyEqual(data.raw(:, 1:3), wl1(:, [1 2 5]));
+            testCase.verifyEqual(data.raw(:, 4:6), wl2(:, [1 2 5]));
+            testCase.verifyEqual(data.fs, 7.8125, 'AbsTol', 1e-9);
+            testCase.verifyEqual(data.probeinfo.Info.Name, 'NIRSport 8x8 Tandem');
+            testCase.verifyLessThan(abs(seconds(data.t0 - datetime(2020, 1, 1, 10, 0, 0))), 1e-3);
+            p = data.probeinfo.Probe{1};
+            testCase.verifyEqual(p.Wavelength, [760 850]);
+            testCase.verifyEqual(p.SD, [3 sqrt(9 + 0.25) sqrt(18)], 'AbsTol', 1e-9); % cm
+            testCase.verifyEqual(height(data.markers), 1);
+            testCase.verifyEqual([data.markers.Time data.markers.Code data.markers.Duration], [12.8 3 0]);
+
+            filepath = testCase.createTempPath('.snirf');
+            pf2.export.asSNIRF(data, filepath, 'TimeZone', 'UTC');
+            testCase.verifyEqual(h5read(filepath, '/nirs/probe/detectorPos3D')', [30 0 80; 0 30 75], 'AbsTol', 1e-9);
+
+            % Without .hdr Events, markers come from the .evt trigger bits
+            writeHdr('');
+            testCase.writeText([root '.evt'], sprintf('8\t1\t0\t0\t0\n16\t0\t1\t1\t0\n'));
+            data = pf2.import.importNIRX([root '.hdr'], false);
+            testCase.verifyEqual(data.markers.Code', [1 6]);
+            testCase.verifyEqual(data.markers.Time', [8 16] / 7.8125, 'AbsTol', 1e-9);
+        end
+
+        function testImportNIRMarkerSources(testCase)
+            % One .mrk file: no source column and the default Amplitude, so
+            % SNIRF stim data has 3 columns. Two files: MarkerSource per row.
+            folder = tempname;
+            mkdir(folder);
+            testCase.addTeardown(@() rmdir(folder, 's'));
+            src = fullfile(testCase.ProjectRoot, 'sampledata');
+            copyfile(fullfile(src, 'sampleNIR.nir'), folder);
+            copyfile(fullfile(src, 'sampleNIR.mrk'), folder);
+            copyfile(fullfile(src, 'sampleNIR_CH.mat'), folder);
+
+            data = pf2.import.importNIR(fullfile(folder, 'sampleNIR.nir'), true, false);
+            testCase.verifyFalse(ismember('MarkerSource', data.markers.Properties.VariableNames));
+            testCase.verifyTrue(all(data.markers.Amplitude == 1));
+            filepath = testCase.createTempPath('.snirf');
+            pf2.export.asSNIRF(data, filepath, 'TimeZone', 'UTC');
+            testCase.verifyEqual(size(h5read(filepath, '/nirs/stim1/data'), 1), 3);
+
+            fid = fopen(fullfile(folder, 'sampleNIR_C.mrk'), 'w');
+            fprintf(fid, '4950.500\t7\t0\tx\ty\n4960.500\t7\t0\tx\ty\n');
+            fclose(fid);
+            data = pf2.import.importNIR(fullfile(folder, 'sampleNIR.nir'), true, false);
+            testCase.verifyTrue(ismember('MarkerSource', data.markers.Properties.VariableNames));
+            testCase.verifyEqual(unique(data.markers.MarkerSource)', [1 2]);
+            testCase.verifyEqual(data.markers.Code(data.markers.MarkerSource == 2)', [7 7]);
+            testCase.verifyTrue(issorted(data.markers.Time));
         end
     end
 

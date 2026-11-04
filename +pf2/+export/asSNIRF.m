@@ -28,25 +28,54 @@ function [snirfData] = asSNIRF(fNIRcells, filepath, varargin)
 %                          Extension .snirf is added if missing in single-file mode.
 %   normalizeRaw         - Normalize raw data before export (default: false)
 %                          If true, scales data for improved compatibility.
-%   stripExtraRawChannels - Remove dark/ambient channels from export (default: false)
+%   stripExtraRawChannels - Remove dark/ambient channels from export (default: true).
+%                          They have no wavelength and readers such as MNE
+%                          treat them as 0 nm CW channels.
 %                          Time and marker columns are always removed.
 %
 % Batch Mode Name-Value Parameters:
 %   'Dir1'..'Dir4'           - Info field names mapped to subdirectories
 %   'Prefix'                 - Cell array of info field names for filename
 %   'NormalizeRaw'           - Normalize raw data (default: false)
-%   'StripExtraRawChannels'  - Strip dark/ambient channels (default: false)
+%   'StripExtraRawChannels'  - Strip dark/ambient channels (default: true)
 %   'Verbose'                - Print progress messages (default: true)
 %   'TimeZone'               - Also accepted in single-file mode (see below)
+%   'Target', 'MaxFillSamples' - Also accepted in single-file mode (see below)
+%   'IncludeIdentifying'     - Also accepted in single-file mode (see below)
 %
 % Name-Value Parameters:
 %   'TimeZone'  - Time zone of the recording's wall-clock start time (t0),
 %                 e.g. 'America/New_York' or '-05:00' (default: ''). Applied
 %                 when t0 has no zone of its own; never taken from this
-%                 machine. With a zone, MeasurementTime carries its UTC offset
-%                 and UnixTime/AcquisitionStartTime are written. Without one,
+%                 machine. With a zone, MeasurementDate/MeasurementTime are
+%                 written in UTC (offset +00:00), MeasurementTimeZone keeps
+%                 the zone, and UnixTime/AcquisitionStartTime are written. Without one,
 %                 MeasurementTime has no offset, UnixTime is omitted and
 %                 'pf2:asSNIRF:noTimeZone' is warned.
+%   'Target'    - 'snirf' (default) or 'mne'. 'mne' prepares the file for
+%                 MNE-Python: dark channels are stripped, every gap is filled
+%                 (MaxFillSamples Inf unless given), landmarks are left out
+%                 (MNE 1.13 reads landmarkPos3D 1000x too large), and
+%                 irregular sample steps are warned about
+%                 ('pf2:asSNIRF:irregularForMNE'). The default writes the
+%                 data as recorded, without interpolated samples.
+%   'MaxFillSamples' - Largest number of missing samples filled per gap
+%                 (default: 1; 0 never fills, Inf fills every gap). A gap is
+%                 a time step longer than 1.5 sample periods. A gap of at
+%                 most this many missing samples is filled on the sampling
+%                 grid by linear interpolation; longer gaps are written as
+%                 recorded, with a warning, since readers that assume
+%                 uniform sampling (MNE) place annotations after them late
+%                 by the gap length. Every gap gets a 'BAD_gap' stim over
+%                 it. importSNIRF removes filled samples and BAD_gap stims.
+%                 Time is written from 0 at the first sample; the original
+%                 time of that sample is in metaDataTags TimeOrigin and
+%                 MeasurementTime describes it.
+%   'IncludeIdentifying' - Write .info fields that identify or describe a
+%                 person (names, date of birth, age, sex, experimenter or
+%                 operator, contact details, free-text notes) to
+%                 metaDataTags (default: false). Path-like values are always
+%                 reduced to the file name.
 %
 % Outputs:
 %   snirfData            - Generated SNIRF data structure
@@ -129,6 +158,9 @@ if isBatchMode
     % Parse batch name-value parameters
     batchOpts = parseBatchOpts(varargin{:});
     paths = pf2_base.buildExportPaths(fNIRcells, filepath, '.snirf', batchOpts);
+    if strcmpi(batchOpts.Target, 'mne') && batchOpts.maxFillDefault
+        batchOpts.MaxFillSamples = Inf;
+    end
     n = numel(fNIRcells);
     for i = 1:n
         if batchOpts.Verbose
@@ -136,7 +168,9 @@ if isBatchMode
         end
         pf2.export.asSNIRF(fNIRcells{i}, paths{i}, ...
             batchOpts.NormalizeRaw, batchOpts.StripExtraRawChannels, ...
-            'TimeZone', batchOpts.TimeZone);
+            'TimeZone', batchOpts.TimeZone, ...
+            'IncludeIdentifying', batchOpts.IncludeIdentifying, 'MaxFillSamples', batchOpts.MaxFillSamples, ...
+            'Target', batchOpts.Target);
     end
     if batchOpts.Verbose
         fprintf('Batch export complete: %d files written to %s\n', n, filepath);
@@ -147,7 +181,7 @@ end
 
 % --- Single/multi-run mode: parse legacy positional or name-value args ---
 normalizeRaw = false;
-stripExtraRawChannels = false;
+stripExtraRawChannels = true;
 args = varargin;
 % Legacy positional: asSNIRF(data, path, true, false)
 if ~isempty(args) && (islogical(args{1}) || isnumeric(args{1}))
@@ -163,10 +197,29 @@ p.KeepUnmatched = true;
 p.addParameter('NormalizeRaw', normalizeRaw, @(x) islogical(x) || isnumeric(x));
 p.addParameter('StripExtraRawChannels', stripExtraRawChannels, @(x) islogical(x) || isnumeric(x));
 p.addParameter('TimeZone', '', @(x) ischar(x) || isstring(x));
+p.addParameter('IncludeIdentifying', false, @(x) islogical(x) || isnumeric(x));
+p.addParameter('MaxFillSamples', 1, @(x) isnumeric(x) && isscalar(x) && x >= 0);
+p.addParameter('Target', 'snirf', @(x) any(strcmpi(char(x), {'snirf', 'mne'})));
 p.parse(args{:});
 normalizeRaw = p.Results.NormalizeRaw;
 stripExtraRawChannels = p.Results.StripExtraRawChannels;
 timeZone = char(p.Results.TimeZone);
+includeIdentifying = logical(p.Results.IncludeIdentifying);
+maxFill = p.Results.MaxFillSamples;
+target = lower(char(p.Results.Target));
+if strcmp(target, 'mne')
+    % MNE compatibility: MNE assumes uniform sampling and treats dark
+    % channels as 0 nm CW channels, so dark channels are stripped and every
+    % gap is filled (unless MaxFillSamples is given)
+    if ~stripExtraRawChannels
+        warning('pf2:asSNIRF:mneStripsDark', ...
+            'Target ''mne'' strips dark channels; StripExtraRawChannels=false is ignored.');
+        stripExtraRawChannels = true;
+    end
+    if ismember('MaxFillSamples', p.UsingDefaults)
+        maxFill = Inf;
+    end
+end
 
 [ filepathdir, filename, ext ] = fileparts(filepath);
 
@@ -199,7 +252,16 @@ for n = 1:numNIRS
     curNIRdata = [];
 
     % Convert info to metadata with enhanced field mapping
-    metaDataTags = info2meta(curStruct, timeZone);
+    % Time is written from 0 at the first sample (readers such as MNE take
+    % the first sample as time 0); the original origin goes to TimeOrigin
+    timeOrigin = 0;
+    if isfield(curStruct, 'time') && numel(curStruct.time) == size(curStruct.raw, 1)
+        tFinite = curStruct.time(isfinite(curStruct.time));
+        if ~isempty(tFinite)
+            timeOrigin = tFinite(1);
+        end
+    end
+    metaDataTags = info2meta(curStruct, timeZone, includeIdentifying, timeOrigin);
 
     % Build probe structure and measurement list
     [probe, measurementList, probeMetaData, rawMax, forceStrippedChannelsMask] = buildProbe(curStruct);
@@ -227,6 +289,15 @@ for n = 1:numNIRS
     for p = 1:length(probeFields)
         metaDataTags.(probeFields{p}) = probeMetaData.(probeFields{p});
     end
+    % COBI .nir files name the exact model (e.g. 2000M vs 2000S) in the
+    % header Data Source line, where the device configuration may not
+    if isfield(curStruct, 'info') && isstruct(curStruct.info) && isfield(curStruct.info, 'header') ...
+            && isstruct(curStruct.info.header) && isfield(curStruct.info.header, 'DataSource')
+        modelTok = regexp(char(curStruct.info.header.DataSource), 'Model\s+(\w+)', 'tokens', 'once');
+        if ~isempty(modelTok)
+            metaDataTags.Model = c2v(['Model ' modelTok{1}]);
+        end
+    end
     
     % Set up data section with time series and measurement list
     data = [];
@@ -251,17 +322,6 @@ for n = 1:numNIRS
         data.dataTimeSeries = data.dataTimeSeries(:, ~extraChannels);
     end
 
-    % Add units to measurement list (improves compatibility)
-    for k = 1:length(data.measurementList)
-        if ~isfield(data.measurementList(k), 'dataUnit') || isempty(data.measurementList(k).dataUnit)
-            if strcmp(data.measurementList(k).dataTypeLabel, 'raw-DC')
-                data.measurementList(k).dataUnit = c2v('V'); % Or appropriate unit
-            elseif strcmp(data.measurementList(k).dataTypeLabel, 'raw-DC-dark')
-                data.measurementList(k).dataUnit = c2v('V'); % Or appropriate unit
-            end
-        end
-    end
-
     % Handle data normalization if requested
     if(normalizeRaw)
         rawDC_channels = rawDCchannels | rawDCdarkChannels;
@@ -283,6 +343,8 @@ for n = 1:numNIRS
         metaDataTags.('Normalized') = c2v('true');
         data.dataTimeSeries(:, rawDC_channels) = normalizedData;
     end
+
+    data.measurementList = toSnirfMeasurementList(data.measurementList);
 
     % Set up stimulus data
     stim = [];
@@ -479,12 +541,33 @@ for n = 1:numNIRS
         end
     end
 
-    % Add coordinate system info to probe (helpful for spatial interpretation)
-    if ~isfield(probe, 'coordinateSystem')
-        probe.coordinateSystem = c2v('Other');
-        probe.coordinateSystemDescription = c2v('Probe coordinate system');
+    if strcmp(target, 'mne')
+        % MNE 1.13 applies the length scaling to landmarkPos3D twice and
+        % reads landmarks 1000x too large; leave them out for MNE
+        probe = rmfield(probe, intersect(fieldnames(probe), {'landmarkPos3D', 'landmarkLabels'}));
     end
-    
+
+    % Time from 0 at the first sample, and gaps filled on the sample grid
+    % (readers such as MNE assume uniform sampling and place annotations by
+    % sample count)
+    [data, stim, aux, nFilled, nGaps] = rebaseAndFillGaps(data, stim, aux, timeOrigin, ...
+        curStruct, maxFill);
+    metaDataTags.TimeOrigin = c2v(sprintf('%.6f', timeOrigin));
+    if strcmp(target, 'mne') && numel(data.time) > 2
+        steps = diff(data.time(:));
+        irregular = mean(abs(steps / median(steps) - 1) > 0.05);
+        if irregular > 0.2
+            warning('pf2:asSNIRF:irregularForMNE', ...
+                ['%.0f%% of sample steps differ from the median step by more than 5%%. ' ...
+                 'MNE assumes uniform sampling, so annotations may drift; consider ' ...
+                 'resampling to a uniform grid (pf2.data.resample) before export.'], 100 * irregular);
+        end
+    end
+    if nGaps > 0
+        metaDataTags.GapStim = c2v('BAD_gap');
+        metaDataTags.FilledGapSamples = c2v(num2str(nFilled));
+    end
+
     % Assemble final structure
     curNIRdata.metaDataTags = metaDataTags;
     curNIRdata.probe = probe;
@@ -529,6 +612,21 @@ function name = dictLabel(dictTbl, code, fallback)
     end
 end
 
+function out = stripPath(val, isPathField)
+    % STRIPPATH Keep only the file name of a path: for path fields always,
+    % for other fields when the value is an absolute path (which can hold
+    % a user name)
+    out = val;
+    isAbsolute = ~isempty(regexp(val, '^(/|~|[A-Za-z]:[\\/]|\\\\)', 'once'));
+    if (isPathField || isAbsolute) && ~isempty(regexp(val, '[\\/]', 'once'))
+        parts = regexp(val, '[\\/]', 'split');
+        parts = parts(~cellfun(@isempty, parts));
+        if ~isempty(parts)
+            out = parts{end};
+        end
+    end
+end
+
 function [dt, hasClock] = toDatetime(val)
     % TODATETIME Parse a datetime or ISO-style date/time string; [] if not parseable
     dt = [];
@@ -568,9 +666,23 @@ function charOut = c2v(str)
     charOut = char(str);
 end
 
-function metaData = info2meta(nirStruct, timeZone)
+function metaData = info2meta(nirStruct, timeZone, includeIdentifying, timeOrigin)
     % Enhanced metadata conversion with support for all requested fields
+    %   timeOrigin - data time of the first sample; MeasurementDate/Time and
+    %                UnixTime describe that sample (time 0 in the file)
     if nargin < 2, timeZone = ''; end
+    if nargin < 3, includeIdentifying = false; end
+    if nargin < 4, timeOrigin = 0; end
+
+    % Fields that identify or describe a person; written only with
+    % IncludeIdentifying (demographics belong in BIDS participants.tsv)
+    identKeys = {'subjectname', 'name', 'patientname', 'firstname', 'givenname', ...
+        'lastname', 'surname', 'middlename', 'dateofbirth', 'dob', 'birthdate', ...
+        'age', 'sex', 'gender', 'experimenter', 'operator', 'initials', ...
+        'contact_info', 'contactinfo', 'email', 'phone', 'address', 'remarks', 'notes', ...
+        'comment', 'comments', 'description', 'subject_name', 'participant_name'};
+    % Fields holding file paths; only the file name is written
+    pathKeys = {'filename', 'filepath', 'fname', 'path', 'montage_path', 'folder', 'directory'};
     
     metaData = [];
     
@@ -615,6 +727,10 @@ function metaData = info2meta(nirStruct, timeZone)
     end
 
     if ~isempty(t0)
+        % Start of the first sample, rounded to the millisecond once so the
+        % written date/time and UnixTime agree
+        t0 = t0 + seconds(timeOrigin);
+        t0.Second = round(t0.Second * 1000) / 1000;
         % A t0 without a zone is the device's wall-clock time. Its zone comes
         % from the TimeZone option; it is never taken from this machine.
         if isempty(t0.TimeZone) && ~isempty(timeZone)
@@ -633,13 +749,15 @@ function metaData = info2meta(nirStruct, timeZone)
                      'without a UTC offset and UnixTime is omitted. Pass ''TimeZone'' ' ...
                      '(e.g. ''America/New_York'') to write absolute times.']);
             else
-                metaData.MeasurementTime = c2v(char(datetime(t0, 'Format', 'HH:mm:ss.SSSxxx')));
+                % Date and time are written in UTC (+00:00): some readers
+                % (MNE) drop the offset and would misplace a local time.
+                % MeasurementTimeZone keeps the recording's zone.
+                t0utc = t0;
+                t0utc.TimeZone = 'UTC';
+                metaData.MeasurementDate = c2v(char(datetime(t0utc, 'Format', 'yyyy-MM-dd')));
+                metaData.MeasurementTime = c2v(char(datetime(t0utc, 'Format', 'HH:mm:ss.SSSxxx')));
                 metaData.MeasurementTimeZone = c2v(t0.TimeZone);
-                tStart = 0;
-                if isfield(nirStruct, 'time') && ~isempty(nirStruct.time)
-                    tStart = min(nirStruct.time);
-                end
-                metaData.AcquisitionStartTime = c2v(sprintf('%.3f', posixtime(t0 + seconds(tStart))));
+                metaData.AcquisitionStartTime = c2v(sprintf('%.3f', posixtime(t0)));
                 metaData.UnixTime = c2v(sprintf('%.3f', posixtime(t0)));
             end
         end
@@ -723,6 +841,12 @@ function metaData = info2meta(nirStruct, timeZone)
         if ismember(mappedName, t0Tags) || ismember(fieldName, t0Tags) || strcmp(fieldName, 'StartDateTime')
             continue;
         end
+        if ~includeIdentifying && (ismember(lower(fieldName), identKeys) || ismember(lower(mappedName), identKeys))
+            continue;
+        end
+        if (ischar(fieldValue) || isstring(fieldValue)) && ~isempty(fieldValue)
+            fieldValue = stripPath(char(fieldValue), ismember(lower(fieldName), pathKeys));
+        end
 
         % Process field value based on type
         if (isstring(fieldValue) || ischar(fieldValue)) && ~isempty(fieldValue)
@@ -751,7 +875,7 @@ function metaData = info2meta(nirStruct, timeZone)
     end
     
     % Process composite name fields if they exist
-    if ~isfield(metaData, 'SubjectName') && (isfield(metaData, 'lastName') || isfield(metaData, 'firstName'))
+    if includeIdentifying && ~isfield(metaData, 'SubjectName') && (isfield(metaData, 'lastName') || isfield(metaData, 'firstName'))
         lastName = '';
         firstName = '';
         middleName = '';
@@ -785,13 +909,14 @@ function metaData = info2meta(nirStruct, timeZone)
     end
     
     % Add study information if available
-    if isfield(info, 'Session') && ~isfield(metaData, 'StudyDescription')
-        metaData.StudyDescription = c2v(['Session: ' info.Session]);
+    if isfield(info, 'Session') && ~isfield(metaData, 'StudyDescription') ...
+            && ~isempty(strtrim(char(string(info.Session))))
+        metaData.StudyDescription = c2v(['Session: ' char(string(info.Session))]);
     end
     
     % Handle sampling rate if available
     if isfield(nirStruct, 'fs') && ~isempty(nirStruct.fs)
-        metaData.SamplingRate = c2v(num2str(nirStruct.fs));
+        metaData.SamplingRate = c2v(sprintf('%.10g', nirStruct.fs));
     end
 end
 
@@ -892,7 +1017,6 @@ function [probe, measurementList, deviceMetaDataTags, rawMax, strippedChannelsMa
                 measurement.wavelengthIndex = wvI(i);
             end
             measurement.wavelengthActual = wvList(darkIdx);
-            measurement.dataUnit = c2v('au');
         else
             measurement.dataType = 1; 
             measurement.dataTypeIndex = 1;
@@ -907,7 +1031,6 @@ function [probe, measurementList, deviceMetaDataTags, rawMax, strippedChannelsMa
                 measurement.wavelengthIndex = wvI(i);
                 measurement.wavelengthActual = wvList(measurement.wavelengthIndex);
             end
-            measurement.dataUnit = c2v('au');
         end
       
         measurementList = [measurementList; measurement];
@@ -969,6 +1092,21 @@ function [probe, measurementList, deviceMetaDataTags, rawMax, strippedChannelsMa
             probe.sourcePos2D(s, :) = srcAll2D(idx, :);
             probe.sourcePos3D(s, :) = srcAll3D(idx, :);
         end
+        % Labels on optode-indexed tables follow the same compression
+        srcRowLabels = posLabels(probeStruct, 'SrcPos');
+        detRowLabels = posLabels(probeStruct, 'DetPos');
+        if ~isempty(srcRowLabels) && numel(srcRowLabels) == numel(srcIds) ...
+                && ~isempty(detRowLabels) && numel(detRowLabels) == numel(detIds)
+            compSrc = strings(maxSrc, 1);
+            compDet = strings(maxDet, 1);
+            for s2 = unique(srcIds(srcIds > 0 & ~isnan(srcIds)))'
+                compSrc(s2) = srcRowLabels(find(srcIds == s2, 1));
+            end
+            for d2 = unique(detIds(detIds > 0 & ~isnan(detIds)))'
+                compDet(d2) = detRowLabels(find(detIds == d2, 1));
+            end
+            compressedLabels = {compSrc, compDet};
+        end
     else
         probe.detectorPos2D = table2array(probeStruct.DetPos(:, {'x_2d', 'y_2d'}));
         probe.detectorPos3D = table2array(probeStruct.DetPos(:, {'x', 'y', 'z'}));
@@ -976,28 +1114,207 @@ function [probe, measurementList, deviceMetaDataTags, rawMax, strippedChannelsMa
         probe.sourcePos3D   = table2array(probeStruct.SrcPos(:, {'x', 'y', 'z'}));
     end
 
-    % Include landmark positions if available
-    if isfield(probeStruct, 'landmarkPos3D')
-        probe.landmarkPos3D = probeStruct.landmarkPos3D;
+    % Landmarks: [x y z index] rows with a 1-D landmarkLabels string array
+    if isfield(probeStruct, 'landmarkPos3D') && ~isempty(probeStruct.landmarkPos3D)
+        lmPos = probeStruct.landmarkPos3D(:, 1:3);
+        probe.landmarkPos3D = [lmPos, (1:size(lmPos, 1))'];
+        if isfield(probeStruct, 'landmarkLabels') && numel(probeStruct.landmarkLabels) == size(lmPos, 1)
+            probe.landmarkLabels = string(probeStruct.landmarkLabels(:))';
+        end
     end
-    if isfield(probeStruct, 'landmarkLabels')
-        probe.landmarkLabels = probeStruct.landmarkLabels;
+
+    % Source and detector labels, when there is one per written position
+    if exist('compressedLabels', 'var')
+        if all(strlength(compressedLabels{1}) > 0) && all(strlength(compressedLabels{2}) > 0)
+            probe.sourceLabels = compressedLabels{1}';
+            probe.detectorLabels = compressedLabels{2}';
+        end
+        srcLabels = [];
+        detLabels = [];
+    else
+        srcLabels = posLabels(probeStruct, 'SrcPos');
+        detLabels = posLabels(probeStruct, 'DetPos');
     end
-    
-    % Add source and detector labels if available
-    if isfield(probeStruct, 'SrcPos') && isfield(probeStruct.SrcPos, 'Label')
-        probe.sourceLabels = probeStruct.SrcPos.Label;
+    if ~isempty(srcLabels) && numel(srcLabels) == size(probe.sourcePos3D, 1)
+        probe.sourceLabels = srcLabels;
     end
-    if isfield(probeStruct, 'DetPos') && isfield(probeStruct.DetPos, 'Label')
-        probe.detectorLabels = probeStruct.DetPos.Label;
+    if ~isempty(detLabels) && numel(detLabels) == size(probe.detectorPos3D, 1)
+        probe.detectorLabels = detLabels;
     end
-    
-    % Add coordinate system info
-    probe.coordinateSystem = c2v('Other');
-    probe.coordinateSystemDescription = c2v('Probe-specific coordinate system');
+
+    % Coordinate system: BIDS identifiers go to probe/coordinateSystem. Any
+    % other device tag (e.g. 'MNI') is not a recognized SNIRF/BIDS system
+    % ('Other' draws a validator warning), so it and its description go to
+    % metaDataTags.CoordinateSystem(Description), which importSNIRF reads
+    sysName = '';
+    sysDesc = '';
+    if isfield(deviceInfoFields, 'CoordinateSystem') && ~isempty(deviceInfoFields.CoordinateSystem)
+        sysName = char(deviceInfoFields.CoordinateSystem);
+    end
+    if isfield(deviceInfoFields, 'CoordinateSystemDescription') && ~isempty(deviceInfoFields.CoordinateSystemDescription)
+        sysDesc = char(deviceInfoFields.CoordinateSystemDescription);
+    end
+    bidsIds = {'MNI152NLin2009cAsym', 'MNI152NLin6Asym', 'fsaverage', 'CapTrak'};
+    isBids = strcmpi(sysName, bidsIds);
+    if any(isBids)
+        probe.coordinateSystem = c2v(bidsIds{isBids});
+        if isempty(sysDesc)
+            sysDesc = sprintf('BIDS coordinate system %s', bidsIds{isBids});
+        end
+        probe.coordinateSystemDescription = c2v(sysDesc);
+    elseif ~isempty(sysName) && ~any(strcmpi(sysName, {'Other', 'Unknown'}))
+        deviceMetaDataTags.CoordinateSystem = c2v(sysName);
+        if ~isempty(sysDesc)
+            deviceMetaDataTags.CoordinateSystemDescription = c2v(sysDesc);
+        end
+    end
      
     % Add wavelengths
     probe.wavelengths = wvList(~isnan(wvList));
+end
+
+
+function [data, stim, aux, nFilled, nGaps] = rebaseAndFillGaps(data, stim, aux, timeOrigin, nirStruct, maxFill)
+    % REBASEANDFILLGAPS Time from 0 at the first sample; mark and fill gaps
+    %   A gap is a time step longer than 1.5 sample periods. Each gap gets a
+    %   'BAD_gap' stim spanning it (MNE reads it as a BAD annotation). A gap
+    %   of at most maxFill missing samples is filled with samples on the
+    %   sampling grid, linearly interpolated between the samples on either
+    %   side; longer gaps are written as recorded and warned about.
+    nFilled = 0;
+    nGaps = 0;
+    t = data.time(:);
+    X = data.dataTimeSeries;
+    gapStim = zeros(0, 3);
+    if numel(t) > 2
+        if isfield(nirStruct, 'fs') && ~isempty(nirStruct.fs) && isfinite(nirStruct.fs) && nirStruct.fs > 0
+            period = 1 / nirStruct.fs;
+        else
+            period = median(diff(t));
+        end
+        dt = diff(t);
+        gapIdx = find(dt > 1.5 * period);
+        nGaps = numel(gapIdx);
+        missing = max(round(dt(gapIdx) / period) - 1, 1);
+        % Fill only steps close to a whole number of periods (missed
+        % samples); a long step from timing jitter is marked, not filled,
+        % unless every gap is to be filled (MaxFillSamples Inf)
+        wholeSteps = abs(dt(gapIdx) / period - (missing + 1)) <= 0.25;
+        doFill = missing <= maxFill & (wholeSteps | isinf(maxFill));
+        gapStim = [t(gapIdx), dt(gapIdx), zeros(nGaps, 1)];
+        if any(~doFill)
+            warning('pf2:asSNIRF:unfilledGaps', ...
+                ['%d gap(s) longer than %g missing sample(s), or not a whole number of ' ...
+                 'sample periods (%.1f s in total), are written as recorded and marked by ' ...
+                 'BAD_gap stims. Readers that assume uniform ' ...
+                 'sampling (MNE) place annotations after them late by the gap lengths. ' ...
+                 'Pass ''MaxFillSamples'', Inf to fill them by interpolation, or export ' ...
+                 'the parts separately (pf2.data.split).'], ...
+                sum(~doFill), maxFill, sum(dt(gapIdx(~doFill))));
+        end
+        fillIdx = gapIdx(doFill);
+        nIns = missing(doFill);
+        if ~isempty(fillIdx)
+            tNew = zeros(numel(t) + sum(nIns), 1);
+            XNew = zeros(numel(t) + sum(nIns), size(X, 2), 'like', X);
+            src = 1;
+            dst = 1;
+            for g = 1:numel(fillIdx)
+                i = fillIdx(g);
+                n = i - src + 1;
+                tNew(dst:dst+n-1) = t(src:i);
+                XNew(dst:dst+n-1, :) = X(src:i, :);
+                dst = dst + n;
+                frac = (1:nIns(g))' / (nIns(g) + 1);
+                tNew(dst:dst+nIns(g)-1) = t(i) + frac * dt(i);
+                XNew(dst:dst+nIns(g)-1, :) = X(i, :) + frac .* (X(i+1, :) - X(i, :));
+                dst = dst + nIns(g);
+                src = i + 1;
+            end
+            n = numel(t) - src + 1;
+            tNew(dst:dst+n-1) = t(src:end);
+            XNew(dst:dst+n-1, :) = X(src:end, :);
+            t = tNew;
+            X = XNew;
+            nFilled = sum(nIns);
+        end
+    end
+    data.time = (t - timeOrigin)';
+    data.dataTimeSeries = X;
+    for m = 1:numel(stim)
+        if ~isempty(stim(m).data)
+            stim(m).data(:, 1) = stim(m).data(:, 1) - timeOrigin;
+        end
+    end
+    if ~isempty(gapStim)
+        gapStim(:, 1) = gapStim(:, 1) - timeOrigin;
+        g = struct();
+        g.name = 'BAD_gap';
+        g.data = gapStim;
+        if isempty(stim)
+            stim = g;
+        else
+            fn = fieldnames(stim);
+            for f = 1:numel(fn)
+                if ~isfield(g, fn{f})
+                    g.(fn{f}) = [];
+                end
+            end
+            stim(end+1) = orderfields(g, stim(1));
+        end
+    end
+    % A stim without its own labels gets the standard three when others
+    % have labels (an empty dataLabels would be written as an invalid
+    % dataset)
+    if ~isempty(stim) && isfield(stim, 'dataLabels')
+        for m = 1:numel(stim)
+            if isempty(stim(m).dataLabels)
+                nCol = size(stim(m).data, 2);
+                lbl = ["startTime", "duration", "value"];
+                if nCol > 3
+                    lbl = [lbl, "column" + string(4:nCol)];
+                end
+                stim(m).dataLabels = lbl(1:max(nCol, 1));
+            end
+        end
+    end
+    for a = 1:numel(aux)
+        if isfield(aux(a), 'time') && ~isempty(aux(a).time)
+            aux(a).time = aux(a).time - timeOrigin;
+        end
+    end
+end
+
+
+function ml = toSnirfMeasurementList(ml)
+    % TOSNIRFMEASUREMENTLIST Measurement list as SNIRF stores it: index and
+    % type fields as integers; no dataTypeLabel (defined for processed data
+    % only, dataType 99999) and no dataUnit (optional; MNE >= 1.13 rejects
+    % 'au'). The labels are only used in memory to find dark channels.
+    if isempty(ml), return; end
+    ml = rmfield(ml, intersect(fieldnames(ml), {'dataTypeLabel', 'dataUnit'}));
+    intFields = intersect(fieldnames(ml), ...
+        {'dataType', 'dataTypeIndex', 'sourceIndex', 'detectorIndex', 'wavelengthIndex'});
+    for k = 1:numel(ml)
+        for f = 1:numel(intFields)
+            v = double(ml(k).(intFields{f}));
+            v(isnan(v)) = 0;
+            ml(k).(intFields{f}) = int32(v);
+        end
+    end
+end
+
+
+function labels = posLabels(probeStruct, field)
+    % POSLABELS Optode labels from a SrcPos/DetPos table as a string row; [] if none
+    labels = [];
+    if isfield(probeStruct, field) && istable(probeStruct.(field)) ...
+            && ismember('Label', probeStruct.(field).Properties.VariableNames)
+        labels = string(probeStruct.(field).Label(:))';
+        if any(ismissing(labels) | strlength(labels) == 0)
+            labels = [];
+        end
+    end
 end
 
 
@@ -1010,9 +1327,13 @@ function opts = parseBatchOpts(varargin)
     p.addParameter('Dir4', '', @(x) ischar(x) || isstring(x));
     p.addParameter('Prefix', {}, @iscell);
     p.addParameter('NormalizeRaw', false, @(x) islogical(x) || isnumeric(x));
-    p.addParameter('StripExtraRawChannels', false, @islogical);
+    p.addParameter('StripExtraRawChannels', true, @(x) islogical(x) || isnumeric(x));
     p.addParameter('Verbose', true, @islogical);
     p.addParameter('TimeZone', '', @(x) ischar(x) || isstring(x));
+    p.addParameter('IncludeIdentifying', false, @(x) islogical(x) || isnumeric(x));
+    p.addParameter('MaxFillSamples', 1, @(x) isnumeric(x) && isscalar(x) && x >= 0);
+    p.addParameter('Target', 'snirf', @(x) any(strcmpi(char(x), {'snirf', 'mne'})));
     p.parse(varargin{:});
     opts = p.Results;
+    opts.maxFillDefault = ismember('MaxFillSamples', p.UsingDefaults);
 end

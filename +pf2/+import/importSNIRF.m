@@ -118,6 +118,7 @@ fNIR = [];
 metaDataTags = stripStruct(data.nirs.metaDataTags);
 
 % Handle markers/stimulus data
+filledGaps = zeros(0, 2);
 if isfield(data.nirs, 'stim') && ~isempty(data.nirs.stim)
     markerTable = pf2_base.normalizeMarkers([]);   % empty canonical table
     stimDict = cell(0, 2);                          % code->label from stim names
@@ -127,6 +128,13 @@ if isfield(data.nirs, 'stim') && ~isempty(data.nirs.stim)
         curStim = stimArray(m);
 
         if ~isfield(curStim, 'data') || isempty(curStim.data)
+            continue;
+        end
+        % Gaps that pf2.export.asSNIRF marked (and filled when short): keep
+        % the intervals to drop any filled samples, not as markers
+        if (isfield(metaDataTags, 'GapStim') || isfield(metaDataTags, 'FilledGapSamples')) && isfield(curStim, 'name') ...
+                && strcmp(strtrim(char(string(curStim.name))), 'BAD_gap')
+            filledGaps = [filledGaps; double(curStim.data(:, 1:2))]; %#ok<AGROW>
             continue;
         end
 
@@ -185,8 +193,14 @@ if ~isfield(data, 'measurementList') || isempty(data.measurementList)
     error('pf2:importSNIRF:noMeasurementList', 'No measurement list found in SNIRF file');
 end
 
-% Convert measurement list to table for easier handling
+% Convert measurement list to table for easier handling. SNIRF stores the
+% index and type fields as integers; work with doubles.
 measurementList = struct2table(data.measurementList);
+for mlVar = measurementList.Properties.VariableNames
+    if isinteger(measurementList.(mlVar{1}))
+        measurementList.(mlVar{1}) = double(measurementList.(mlVar{1}));
+    end
+end
 
 % Add dataTypeLabel column if not present (some SNIRF files use numeric dataType only)
 if ~ismember('dataTypeLabel', measurementList.Properties.VariableNames)
@@ -211,7 +225,11 @@ if isfield(metaDataTags, 'Normalized') && ...
    (strcmpi(metaDataTags.Normalized, '1') || strcmpi(metaDataTags.Normalized, 'true'))
     if isfield(metaDataTags, 'RawMax')
         % Find all raw DC channels (both normal and dark)
+        % Raw channels: dataType 1 (CW amplitude) or a pf2 'raw-DC' label
         rawDC_channels = contains(cat(1, measurementList.dataTypeLabel), 'raw-DC');
+        if ismember('dataType', measurementList.Properties.VariableNames)
+            rawDC_channels = rawDC_channels(:) | measurementList.dataType(:) == 1;
+        end
         rawMax = str2double(metaDataTags.RawMax);
         
         % De-normalize by multiplying by rawMax
@@ -232,8 +250,27 @@ if isfield(data, 'time')
     % Ensure time is a column vector [T x 1]
     fNIR.time = data.time(:);
     
-    % Calculate sampling rate from time data
-    fNIR.fs = 1/nanmedian(diff(fNIR.time));
+    % Drop samples that pf2.export.asSNIRF filled inside gaps
+    if ~isempty(filledGaps)
+        inGap = false(size(fNIR.time));
+        for g = 1:size(filledGaps, 1)
+            inGap = inGap | (fNIR.time > filledGaps(g, 1) + 1e-9 & ...
+                fNIR.time < filledGaps(g, 1) + filledGaps(g, 2) - 1e-9);
+        end
+        fNIR.time(inGap) = [];
+        fNIR.raw(inGap, :) = [];
+    end
+
+    % Sampling rate: the SamplingRate tag when present (a counter-timed or
+    % gap-filled recording), else from the time data
+    fNIR.fs = NaN;
+    if isfield(metaDataTags, 'SamplingRate')
+        fNIR.fs = str2double(string(metaDataTags.SamplingRate));
+    end
+    fsFromTag = isfinite(fNIR.fs) && fNIR.fs > 0;
+    if ~fsFromTag
+        fNIR.fs = 1/nanmedian(diff(fNIR.time));
+    end
 else
     % Create time vector if not available
     warning('No time data found. Creating time vector with default sampling rate.');
@@ -247,6 +284,15 @@ end
 
 % Set metadata
 fNIR.info = metaDataTags;
+% The SamplingRate tag is the authoritative rate (e.g. a counter-timed .nir
+% whose median step differs from 1/fs). Record the time vector it belongs
+% to, so device setup keeps it until the data are resampled or cut
+% (pf2_base.timebaseMatches)
+if exist('fsFromTag', 'var') && fsFromTag && numel(fNIR.time) >= 2
+    tt = double(fNIR.time(:));
+    fNIR.info.timebase = struct('method', 'snirf', 'fs', fNIR.fs, 'nSamples', numel(tt), ...
+        'medianStep', median(diff(tt)), 'timeSignature', [numel(tt), tt(end) - tt(1), median(diff(tt))]);
+end
 
 % Build the canonical marker dictionary. Stim condition names provide a
 % code->label mapping (so labels survive an asSNIRF round-trip); a BIDS
@@ -312,48 +358,88 @@ if scaleFactor ~= 1
     end
 end
 
+% Optode labels may load as a char matrix (fixed-width strings), a string
+% array or a cellstr; use a column cellstr
+lblCounts = struct('sourceLabels', NaN, 'detectorLabels', NaN);
+if isfield(probeInfo, 'sourcePos3D'), lblCounts.sourceLabels = size(probeInfo.sourcePos3D, 1); end
+if isfield(probeInfo, 'detectorPos3D'), lblCounts.detectorLabels = size(probeInfo.detectorPos3D, 1); end
+for lblField = {'sourceLabels', 'detectorLabels'}
+    if isfield(probeInfo, lblField{1})
+        probeInfo.(lblField{1}) = toLabelCell(probeInfo.(lblField{1}), lblCounts.(lblField{1}));
+    end
+end
+
 % Handle timestamp data
 if isfield(metaDataTags, 'UnixTime')
     unixTime = str2double(metaDataTags.UnixTime);
 
-    % Convert Unix time to datetime
-    fNIR.t0 = datetime(unixTime, 'ConvertFrom', 'posixtime');
+    % Unix time is an absolute (UTC) instant; express it in the recording's
+    % zone when one is recorded, else keep it in UTC
+    fNIR.t0 = datetime(unixTime, 'ConvertFrom', 'posixtime', 'TimeZone', 'UTC');
 
-    if isfield(metaDataTags, 'MeasurementTimeZone')
-        fNIR.t0.TimeZone = metaDataTags.MeasurementTimeZone;
-    else
-        fNIR.t0.TimeZone = 'local';
+    if isfield(metaDataTags, 'MeasurementTimeZone') && ~isempty(metaDataTags.MeasurementTimeZone)
+        try
+            fNIR.t0.TimeZone = metaDataTags.MeasurementTimeZone;
+        catch
+            warning('pf2:importSNIRF:badTimeZone', ...
+                'Unrecognized MeasurementTimeZone ''%s''; t0 is kept in UTC.', ...
+                char(metaDataTags.MeasurementTimeZone));
+        end
     end
 elseif isfield(metaDataTags, 'MeasurementTime') && isfield(metaDataTags, 'MeasurementDate')
-    hasMilliseconds = contains(metaDataTags.MeasurementTime, '.');
-    dateTimeStr = [metaDataTags.MeasurementDate 'T' metaDataTags.MeasurementTime];
-    
-    try
-        if hasMilliseconds
+    % ISO date + time, with an optional UTC offset (Z or +hh:mm). With an
+    % offset the instant is absolute; without one it is the device's
+    % wall-clock time and stays zone-less unless MeasurementTimeZone names
+    % the zone. The zone is never taken from this machine.
+    dateTimeStr = [strtrim(char(metaDataTags.MeasurementDate)) 'T' strtrim(char(metaDataTags.MeasurementTime))];
+    tz = '';
+    if isfield(metaDataTags, 'MeasurementTimeZone') && ~isempty(metaDataTags.MeasurementTimeZone)
+        tz = char(metaDataTags.MeasurementTimeZone);
+    end
+    fmts = {'yyyy-MM-dd''T''HH:mm:ss.SSSSSSXXX', 'yyyy-MM-dd''T''HH:mm:ss.SSSXXX', 'yyyy-MM-dd''T''HH:mm:ssXXX', ...
+            'yyyy-MM-dd''T''HH:mm:ss.SSSSSSxxx', 'yyyy-MM-dd''T''HH:mm:ss.SSSxxx', 'yyyy-MM-dd''T''HH:mm:ssxxx'};
+    for k = 1:numel(fmts)
+        try
+            fNIR.t0 = datetime(dateTimeStr, 'InputFormat', fmts{k}, 'TimeZone', 'UTC');
+            break;
+        catch
+        end
+    end
+    if ~isfield(fNIR, 't0')
+        fmts = {'yyyy-MM-dd''T''HH:mm:ss.SSSSSS', 'yyyy-MM-dd''T''HH:mm:ss.SSS', 'yyyy-MM-dd''T''HH:mm:ss'};
+        for k = 1:numel(fmts)
             try
-                fNIR.t0 = datetime(dateTimeStr, 'InputFormat', 'yyyy-MM-dd''T''HH:mm:ss.SSSz', 'TimeZone', 'GMT');
-                if isfield(metaDataTags, 'MeasurementTimeZone')
-                    fNIR.t0.TimeZone = metaDataTags.MeasurementTimeZone;
-                else
-                    fNIR.t0.TimeZone = 'local';
-                end
+                fNIR.t0 = datetime(dateTimeStr, 'InputFormat', fmts{k});
+                break;
             catch
-                fNIR.t0 = datetime(dateTimeStr, 'InputFormat', 'yyyy-MM-dd''T''HH:mm:ss.SSS', 'TimeZone', 'local');
-            end
-        else
-            try
-                fNIR.t0 = datetime(dateTimeStr, 'InputFormat', 'yyyy-MM-dd''T''HH:mm:ssz', 'TimeZone', 'GMT');
-                if isfield(metaDataTags, 'MeasurementTimeZone')
-                    fNIR.t0.TimeZone = metaDataTags.MeasurementTimeZone;
-                else
-                    fNIR.t0.TimeZone = 'local';
-                end
-            catch
-                fNIR.t0 = datetime(dateTimeStr, 'InputFormat', 'yyyy-MM-dd''T''HH:mm:ss', 'TimeZone', 'local');
             end
         end
-    catch
+    end
+    if ~isfield(fNIR, 't0')
         warning('Failed to parse date/time information');
+    elseif ~isempty(tz)
+        try
+            fNIR.t0.TimeZone = tz;   % converts a zoned t0; labels a zone-less one
+        catch
+            warning('pf2:importSNIRF:badTimeZone', ...
+                'Unrecognized MeasurementTimeZone ''%s''; ignored.', tz);
+        end
+    end
+end
+
+% pf2.export.asSNIRF writes time from 0 at the first sample and keeps the
+% original time of that sample in TimeOrigin; MeasurementTime describes the
+% first sample. Restore the original time base.
+if isfield(metaDataTags, 'TimeOrigin')
+    tOrigin = str2double(string(metaDataTags.TimeOrigin));
+    if isfinite(tOrigin) && tOrigin ~= 0
+        fNIR.time = fNIR.time + tOrigin;
+        if istable(fNIR.markers) && height(fNIR.markers) > 0
+            fNIR.markers.Time = fNIR.markers.Time + tOrigin;
+        end
+        if isfield(fNIR, 't0') && isdatetime(fNIR.t0)
+            fNIR.t0 = fNIR.t0 - seconds(tOrigin);
+        end
     end
 end
 
@@ -379,6 +465,9 @@ device.Info.DefaultSamplingRate = fNIR.fs;
 device.Info.MaxSamplingRate = fNIR.fs;
 device.Info.NumberProbes = 1;
 device.Info.RawMax = nanmax(nanmax(fNIR.raw));
+if isfield(metaDataTags, 'RawMax') && isfinite(str2double(string(metaDataTags.RawMax)))
+    device.Info.RawMax = str2double(string(metaDataTags.RawMax));
+end
 device.Info.RawMin = nanmin(nanmin(fNIR.raw));
 device.Info.NumberChannels = 0;
 
@@ -511,6 +600,14 @@ for p = 1:1 % Just one probe for now
     device.Probe{p}.DetPos.x = device.Probe{p}.DetPosX(:);
     device.Probe{p}.DetPos.y = device.Probe{p}.DetPosY(:);
     device.Probe{p}.DetPos.z = device.Probe{p}.DetPosZ(:);
+    % Optode labels (e.g. 10-10 positions) as table columns, which
+    % pf2.export.asSNIRF writes back
+    if isfield(probeInfo, 'sourceLabels') && numel(probeInfo.sourceLabels) == height(device.Probe{p}.SrcPos)
+        device.Probe{p}.SrcPos.Label = probeInfo.sourceLabels(:);
+    end
+    if isfield(probeInfo, 'detectorLabels') && numel(probeInfo.detectorLabels) == height(device.Probe{p}.DetPos)
+        device.Probe{p}.DetPos.Label = probeInfo.detectorLabels(:);
+    end
     
     % Initialize channel labels
     device.Probe{p}.TableCh.Label(:) = "";
@@ -740,6 +837,15 @@ landmarks = [];
 if isfield(probeInfo, 'coordinateSystem')
     coordSys = probeInfo.coordinateSystem;
 end
+% pf2 writes a non-BIDS device tag (e.g. 'MNI') to metaDataTags rather than
+% probe/coordinateSystem (earlier versions wrote probe 'Other'); restore it
+if (isempty(coordSys) || strcmpi(strtrim(char(string(coordSys))), 'Other')) ...
+        && isfield(metaDataTags, 'CoordinateSystem') && ~isempty(metaDataTags.CoordinateSystem)
+    coordSys = char(metaDataTags.CoordinateSystem);
+    if isfield(metaDataTags, 'CoordinateSystemDescription') && ~isempty(metaDataTags.CoordinateSystemDescription)
+        coordSysDesc = char(metaDataTags.CoordinateSystemDescription);
+    end
+end
 
 if isempty(coordSys)
     % Try to read from BIDS sidecar (coordsystem.json)
@@ -763,9 +869,21 @@ if isfield(probeInfo, 'landmarkPos3D') && isfield(probeInfo, 'landmarkLabels')
     landmarkPos = probeInfo.landmarkPos3D;
     landmarkLabels = probeInfo.landmarkLabels;
 
-    % Create landmarks table
+    % Create landmarks table. Labels may load as a char matrix (fixed-width
+    % strings, as NIRx writes them), a string array or a cellstr.
     nLandmarks = size(landmarkPos, 1);
-    if nLandmarks == length(landmarkLabels)
+    if ischar(landmarkLabels)
+        if size(landmarkLabels, 1) ~= nLandmarks && size(landmarkLabels, 2) == nLandmarks
+            landmarkLabels = landmarkLabels';
+        end
+        landmarkLabels = cellstr(landmarkLabels);
+    elseif isstring(landmarkLabels)
+        landmarkLabels = cellstr(landmarkLabels);
+    end
+    if iscell(landmarkLabels)
+        landmarkLabels = strtrim(landmarkLabels(:));
+    end
+    if nLandmarks == numel(landmarkLabels)
         landmarks = table();
         landmarks.Label = landmarkLabels(:);
         landmarks.X = landmarkPos(:, 1);
@@ -784,12 +902,18 @@ if isfield(probeInfo, 'landmarkPos3D') && isfield(probeInfo, 'landmarkLabels')
             end
         end
         landmarks.Type = categorical(landmarkType);
+        % Also on the probe, where pf2.export.asSNIRF writes them from
+        for pp = 1:numel(device.Probe)
+            device.Probe{pp}.landmarkPos3D = landmarkPos(:, 1:3);
+            device.Probe{pp}.landmarkLabels = landmarkLabels(:);
+        end
     end
 end
 
 % Import auxiliary data if available
 if isfield(nirs, 'aux') && ~isempty(nirs.aux)
     fNIR.Aux = struct();
+    auxOwnTime = {};
     
     for i = 1:length(nirs.aux)
         auxItem = nirs.aux(i);
@@ -805,9 +929,11 @@ if isfield(nirs, 'aux') && ~isempty(nirs.aux)
         fNIR.Aux.(fieldName) = struct();
         fNIR.Aux.(fieldName).data = auxItem.dataTimeSeries;
         
-        % Add time if available
+        % Add time if available (an inherited fNIR.time already has the
+        % time origin restored)
         if isfield(auxItem, 'time')
             fNIR.Aux.(fieldName).time = auxItem.time;
+            auxOwnTime{end+1} = fieldName; %#ok<AGROW>
         else
             fNIR.Aux.(fieldName).time = fNIR.time;
         end
@@ -817,11 +943,27 @@ if isfield(nirs, 'aux') && ~isempty(nirs.aux)
             fNIR.Aux.(fieldName).unit = auxItem.dataUnit;
         end
     end
+    % Aux signals with their own time follow the restored time origin (see
+    % TimeOrigin above)
+    if exist('tOrigin', 'var') && isfinite(tOrigin) && tOrigin ~= 0
+        for ai = 1:numel(auxOwnTime)
+            fNIR.Aux.(auxOwnTime{ai}).time = fNIR.Aux.(auxOwnTime{ai}).time + tOrigin;
+        end
+    end
 end
 
 % Set channel quality mask (one per optode pair, all good by default)
 fNIR.fchMask = ones(1, device.Info.NumberChannels);
 
+
+% Keep the coordinate system in the device information as well, where
+% pf2.export.asSNIRF reads it on re-export
+if ~isempty(coordSys) && ~strcmpi(coordSys, 'Unknown')
+    device.Info.CoordinateSystem = char(coordSys);
+    if ~isempty(coordSysDesc)
+        device.Info.CoordinateSystemDescription = char(coordSysDesc);
+    end
+end
 
 % Save probe info
 if isfield(fNIR, 'probeinfo')
@@ -1181,4 +1323,24 @@ catch e
     coordSysInfo = [];
 end
 
+end
+
+
+function c = toLabelCell(v, n)
+% TOLABELCELL Labels as a trimmed column cellstr
+%   A fixed-width char matrix may hold one label per row or per column; n,
+%   the expected number of labels, decides which
+if ischar(v)
+    if nargin > 1 && isfinite(n) && size(v, 1) ~= n && size(v, 2) == n
+        v = v';
+    end
+    c = cellstr(v);
+elseif isstring(v)
+    c = cellstr(v(:));
+elseif iscell(v)
+    c = cellfun(@(x) char(string(x)), v(:), 'UniformOutput', false);
+else
+    c = {};
+end
+c = strtrim(c(:));
 end

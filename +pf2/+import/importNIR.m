@@ -51,12 +51,36 @@ function [fNIR] = importNIR(nir_filename, mrk_filename, channelCheck, varargin)
 %   - Baseline data is included as continuous recording (t < 0)
 %   - Channel check results are cached in {filename}_pf2mask.mat
 %   - Requires device configuration to be loaded (pf2.settings.selectDevice)
-%   - Marker columns from .mrk files: the third column is read as Duration.
-%     COBI Studio writes a running counter there rather than an event
-%     duration, so durations from COBI .mrk files are not event lengths
-%     (pf2.export.asNIR writes real durations in that column). Markers from
-%     manual marker files get Duration 100. Amplitude holds the index of the
-%     .mrk file the marker came from (1 = <name>.mrk, 2 = <name>_C.mrk, ...).
+%   - Markers are read from <name>.mrk, <name>_C.mrk, <name>_Mark1.mrk and
+%     <name>_Mark2.mrk when present. In automatic marker files the columns
+%     are Time, Code, Duration, then any further columns (a fourth column is
+%     Amplitude). COBI Studio writes a non-decreasing integer in the third
+%     column, not an event length, so Duration from COBI files is not a
+%     duration; pf2.export.asNIR writes real durations there. Manual marker
+%     files (time stamps against the start code) get Duration 100, and
+%     Amplitude is 1 unless the file has a fourth column.
+%   - When markers come from more than one .mrk file, a MarkerSource column
+%     holds the file each marker came from (1 = <name>.mrk, 2 = <name>_C.mrk,
+%     3 = <name>_Mark1.mrk, 4 = <name>_Mark2.mrk).
+%   - When the PC time column restarts, markers and the header start time
+%     are moved into the PC frame of the time base (info.timebase.frames);
+%     manual marker files (<name>_C.mrk, timed by the PC QPC timer from the
+%     session start) move by frame 1's offset, like the start time; each
+%     automatic marker file is placed in the sequence of frames that contains
+%     its PC times, keeps it in order (a drop of more than 1 s marks a
+%     restart) and favours the longest frames; markers that could belong
+%     to more than one frame are warned about.
+%   - COBI Studio Modern files whose last column is the device sample counter
+%     are timed from the counter (pf2_base.nirCounterTimebase): the counter
+%     tick is fitted to the PC clock (33/32768 s by default on the 2000M;
+%     1 ms on the 2000S and 3000C, kept exact when the fit is within 50
+%     ppm), each segment between counter resets is
+%     anchored to its PC latency floor, and fs is 1/(tick x mean counts per
+%     sample on the 2000M, median elsewhere). Segment, gap and latency QC is
+%     in info.timebase. 1200W files (16-bit counter) and files without a
+%     counter use the PC time column; their step regularity is in
+%     info.timing, and irregular sampling is warned about
+%     (pf2_base.nirTimingCheck).
 %   - t0 is the header Start Time as local wall-clock time with no time zone;
 %     pass 'TimeZone' to pf2.export.asSNIRF to write absolute times.
 %
@@ -280,19 +304,36 @@ end
 
 if(iscell(mrk_filename))
 	
-    tempData=[];
+    % Normalize each marker file on its own (manual and automatic files have
+    % different column counts), then merge. The index of the file a marker
+    % came from is kept as MarkerSource only when more than one file
+    % contributed markers.
+    markerTbl=[];
+    nSources=0;
+    manualSources=[];
     for i=1:length(mrk_filename)
-		markerCell{i}=importMrk(mrk_filename{i},header.startCode,i);
-        if(isfield(markerCell{i},'data'))
-            tempData=[tempData;markerCell{i}.data];
+		markerCell{i}=importMrk(mrk_filename{i},header.startCode);
+        if(isfield(markerCell{i},'data')&&~isempty(markerCell{i}.data))
+            fileTbl=pf2_base.normalizeMarkers(markerCell{i}.data);
+            fileTbl(isnan(fileTbl.Time),:)=[];
+            if(height(fileTbl)==0)
+                continue;
+            end
+            fileTbl.MarkerSource=repmat(i,height(fileTbl),1);
+            if(isfield(markerCell{i},'manual')&&markerCell{i}.manual)
+                manualSources(end+1)=i; %#ok<AGROW>
+            end
+            nSources=nSources+1;
+            markerTbl=pf2_base.mergeMarkers(markerTbl,fileTbl);
         end
     end
     
     
     markers=markerCell{1};
-    if(~isempty(tempData)) % Merge and sort marker values (.info sections are only preserved for first marker file)
-        [~,idx]=sort(tempData(:,1));
-       markers.data=tempData(idx,:); 
+    if(~isempty(markerTbl)) % Merged in file order; sorted once times are final (.info sections are only preserved for first marker file)
+        markers.data=markerTbl;
+        markers.nSources=nSources;
+        markers.manualSources=manualSources;
     end
     
 else
@@ -327,10 +368,20 @@ while(ischar(lineF))
          lineF=fgetl(fid); %Get Next Line
          continue;
      end
+    if(contains(lineF, 'Baseline values'))
+        % The next line holds the baseline means, not a sample
+        lineF=fgetl(fid);
+        if(ischar(lineF)&&~contains(lineF,'Baseline'))
+            lineF=fgetl(fid);
+        end
+        continue;
+    end
     
     if(contains(lineF, 'Baseline end'))
         baseline(isnan(baseline(:,1)),:)=[]; %trim NaN rows;
-        baseline(baseline(:,1)<=0,:)=[]; %remove markerrows and zero rows
+        % Remove marker rows (negative codes) and empty rows; a sample can
+        % have PC time 0 right after a PC clock restart
+        baseline(all(baseline==baseline(:,1),2),:)=[];
         lineF=fgetl(fid); %Get Next Line
        break; 
     end
@@ -398,7 +449,7 @@ while(lineF~=-1)
     lineF=fgetl(fid);
 end
 data(isnan(data(:,1)),:)=[]; %trim nan rows
-data(data(:,1)<=0,:)=[]; %trim zero or negative rows
+data(all(data==data(:,1),2),:)=[]; %trim marker rows (one code repeated) and incomplete (zeroed) rows
 
 data=[[baseline,zeros(size(baseline,1),size(data,2)-size(baseline,2))];data];
 
@@ -411,7 +462,7 @@ clear fid line1 lineCount line
 
 
 
-data(data(:,1)==0,:)=[];
+data(all(data==0,2),:)=[];
 
 justOnes=all(data==1);
 justOnes_Baseline=all(baseline==1);
@@ -425,7 +476,17 @@ data(allNaN>0,:)=[];
 
 % Check for sample count in last column and drop it (newer cobi)
 lastCol=data(:,end);
-lastColIsSampleCount = all(diff(lastCol(1:100))>0)&&max(lastCol)>100000;
+% Device model from the header (COBI Studio Modern: 'Data Source: ..., Model 2000M Imager, ...')
+model='';
+if(hasDataSource)
+    modelTok=regexp(header.DataSource,'Model\s+(\w+)','tokens','once');
+    if(~isempty(modelTok))
+        model=modelTok{1};
+    end
+end
+% The last column is the device sample counter on COBI Studio Modern files
+% (see pf2_base.isNirCounterColumn; 1200W files stay on the PC time column)
+lastColIsSampleCount=pf2_base.isNirCounterColumn(lastCol,model);
 
 if(size(data,2)>(size(baseline,2))||lastColIsSampleCount) % Last column in newer cobi is sample count, but not included in baseline
      if(size(data,2)==size(baseline,2))
@@ -435,27 +496,62 @@ if(size(data,2)>(size(baseline,2))||lastColIsSampleCount) % Last column in newer
     data=data(:,1:end-1);
 end
 
+timebase=[];
 if(lastColIsSampleCount)
-    % if we have sample count rewrite time data with that
-    countResets = find(diff(lastCol)<0);
-    newTime=data(1,1)+lastCol/1000-lastCol(1)/1000;
-    
-    for r=1:length(countResets)
-        timeDiff=data(countResets(r)+1,1)-data(countResets(r),1);
-        newTime(countResets(r)+1:end,1)=-newTime(countResets(r)+1)+newTime(countResets(r,1))+timeDiff+newTime(countResets(r)+1:end,1);
-        warning('Count resets detected\n')
-    end
-    data(:,1)=newTime;
+    % Time from the sample counter: tick fitted to the PC clock per segment,
+    % each segment anchored to its latency floor (see pf2_base.nirCounterTimebase)
+    [data(:,1),timebase]=pf2_base.nirCounterTimebase(data(:,1),lastCol,'Model',model);
 end
-
-
-
-
 
 fNIR.raw=data;
 fNIR.time=data(:,1);
-fNIR.fs=1./median(diff(fNIR.time));
+timing=[];
+if(~isempty(timebase))
+    fNIR.fs=timebase.fs;
+else
+    fNIR.fs=1./median(diff(fNIR.time));
+    % PC-timed file: report and warn about irregular sampling
+    timing=pf2_base.nirTimingCheck(fNIR.time);
+end
 fNIR.fchMask=fchMask;
+
+% Markers and the header start time are in the PC frame they were recorded
+% in; the counter time base uses the PC frame in force after the last
+% restart, so move them into it
+if(~isempty(timebase)&&isfield(markers,'data')&&istable(markers.data)&& ...
+        height(timebase.frames)>1&&ismember('MarkerSource',markers.data.Properties.VariableNames))
+    manualSources=[];
+    if(isfield(markers,'manualSources'))
+        manualSources=markers.manualSources;
+    end
+    [markers.data.Time,timebase.markerFrames,nAmbiguous]=markersToFrames( ...
+        markers.data.Time,markers.data.MarkerSource,timebase.frames,manualSources);
+    timebase.ambiguousMarkers=nAmbiguous;
+    if(nAmbiguous>0)
+        warning('pf2:importNIR:ambiguousMarkerFrame', ...
+            ['%d marker(s) could belong to more than one PC frame; each marker file was ' ...
+             'placed in the sequence of frames that keeps it in order and favours the ' ...
+             'longest frames.'],nAmbiguous);
+    end
+end
+if(~isempty(timebase)&&isfield(fNIR,'t0')&&~isempty(fNIR.t0)&&timebase.t0Shift~=0)
+    fNIR.t0=fNIR.t0+seconds(timebase.t0Shift);
+    if(~all(timebase.frames.LinkedToNext(1:end-1)))
+        warning('pf2:importNIR:t0Unlinked', ...
+            ['A PC clock restart coincides with a counter reset, so the start time ' ...
+             'moved into the final PC frame is approximate.']);
+    end
+end
+if(isfield(markers,'data')&&istable(markers.data))
+    [markers.data,order]=sortrows(markers.data,'Time');
+    if(~isempty(timebase)&&isfield(timebase,'markerFrames'))
+        timebase.markerFrames=timebase.markerFrames(order);
+    end
+    if(ismember('MarkerSource',markers.data.Properties.VariableNames)&& ...
+            (~isfield(markers,'nSources')||markers.nSources<2))
+        markers.data.MarkerSource=[];
+    end
+end
 
 if(isfield(markers,'data'))
 	fNIR.markers=markers.data;
@@ -474,6 +570,14 @@ end
 
 fNIR.info.filename=nir_filename;
 fNIR.info.baseline=baseline;
+if(~isempty(timebase))
+    % Per-sample arrays (delivery latency, PC times) stay out of info, which
+    % is copied into every segment and export manifest; call
+    % pf2_base.nirCounterTimebase directly for them
+    fNIR.info.timebase=rmfield(timebase,intersect(fieldnames(timebase),{'latency','pcTime','noCounterRows'}));
+elseif(~isempty(timing))
+    fNIR.info.timing=timing;
+end
 
 if(~isempty(log_info)&&isfield(log_info,'SubjectID'))
     fNIR.info.SubjectID=log_info.SubjectID;
@@ -723,10 +827,117 @@ function cfgName = lookupProbeCfg(modelDigits, probeStyle)
     end
 end
 
-function markers=importMrk(mrk_filename,startCode,mrkSourceID)
-    if(nargin<3)
-        mrkSourceID=0;
+function [t,frameOf,nAmbiguous]=markersToFrames(t,source,frames,manualSources)
+% Place each marker in a PC frame and add that frame's offset. Within one
+% marker file the markers are in time order, so frames never go back, and a
+% marker time that drops by more than 1 s (the PC restart threshold) means a
+% restart came between two markers, so the frame must advance there. A
+% marker can only be in a frame whose PC range contains its time (0.5 s
+% tolerance when none does). Among the frame sequences that satisfy this,
+% the one with the longest frames is chosen (markers are more likely in
+% the longer parts of a recording). A marker whose frame differs between
+% feasible sequences is counted as ambiguous.
+% Manual marker files (<name>_C.mrk) are timed by the PC QPC timer from the
+% session start, a clock that PC column restarts do not reset: they are in
+% frame 1's clock and move by frame 1's offset, like the start time.
+if(nargin<4)
+    manualSources=[];
+end
+nF=height(frames);
+lo=frames.PCStart; hi=frames.PCEnd;
+lo(1)=-inf; hi(end)=inf;
+dur=max(frames.PCEnd-frames.PCStart,eps);
+logDur=log(dur(:)');
+tol=0.5;
+restartDrop=1;
+frameOf=nan(size(t));
+ambiguous=false(size(t));
+for s=unique(source(:))'
+    idx=find(source==s);
+    if(ismember(s,manualSources))
+        frameOf(idx)=1;
+        continue;
     end
+    n=numel(idx);
+    m=t(idx);
+    % Allowed frames per marker
+    allowed=false(n,nF);
+    for j=1:n
+        a=m(j)>=lo'&m(j)<=hi';
+        if(~any(a))
+            a=m(j)>=lo'-tol&m(j)<=hi'+tol;
+        end
+        allowed(j,:)=a;
+    end
+    % Forward pass: best score ending in each frame
+    score=-inf(n,nF);
+    from=zeros(n,nF);
+    score(1,allowed(1,:))=logDur(allowed(1,:));
+    feasibleFwd=false(n,nF);
+    feasibleFwd(1,:)=allowed(1,:);
+    for j=2:n
+        strict=m(j)<m(j-1)-restartDrop;
+        for g=find(allowed(j,:))
+            if(strict)
+                prevOK=1:g-1;
+            else
+                prevOK=1:g;
+            end
+            [best,ib]=max(score(j-1,prevOK));
+            if(~isempty(best)&&isfinite(best))
+                score(j,g)=best+logDur(g);
+                from(j,g)=prevOK(ib);
+                feasibleFwd(j,g)=true;
+            end
+        end
+    end
+    if(~any(isfinite(score(n,:))))
+        % No consistent sequence (e.g. a marker outside every frame): keep
+        % file order with the first allowed frame, or stay in frame 1
+        f=1;
+        for j=1:n
+            c=find(allowed(j,:)&(1:nF)>=f,1);
+            if(~isempty(c))
+                f=c;
+            end
+            frameOf(idx(j))=f;
+        end
+        ambiguous(idx)=true;
+        continue;
+    end
+    % Backtrack the best sequence
+    [~,g]=max(score(n,:));
+    seq=zeros(n,1);
+    for j=n:-1:1
+        seq(j)=g;
+        if(j>1)
+            g=from(j,g);
+        end
+    end
+    frameOf(idx)=seq;
+    % Backward feasibility: which frames could each marker take in some
+    % consistent sequence
+    feasibleBwd=false(n,nF);
+    feasibleBwd(n,:)=allowed(n,:);
+    for j=n-1:-1:1
+        strict=m(j+1)<m(j)-restartDrop;
+        for g=find(allowed(j,:))
+            if(strict)
+                nextOK=g+1:nF;
+            else
+                nextOK=g:nF;
+            end
+            feasibleBwd(j,g)=any(feasibleBwd(j+1,nextOK));
+        end
+    end
+    ambiguous(idx)=sum(feasibleFwd&feasibleBwd,2)>1;
+end
+t=t+frames.Offset(frameOf);
+nAmbiguous=sum(ambiguous);
+end
+
+
+function markers=importMrk(mrk_filename,startCode)
 	if((ischar(mrk_filename)||isstring(mrk_filename))&&~isempty(mrk_filename))
 		mrkid = fopen(mrk_filename);
 	else
@@ -757,7 +968,7 @@ function markers=importMrk(mrk_filename,startCode,mrkSourceID)
    if(count~=0)  % Then its a manual marker file
 		markers=importManualMrkFile(mrkid,startCode,true);
 	elseif contains(lower(lineF),'marker') % then its an automatic marker file
-		markers=importMrkFile(mrkid,mrkSourceID);
+		markers=importMrkFile(mrkid);
 	else
 	   markers=[];
 	end
@@ -774,7 +985,8 @@ function markers=importManualMrkFile(mrkid,startCode,useStrSplit)
 
 	frewind(mrkid);
     
-    markers.info.startcode=startCode; % time noting start of fNIRS file 
+    markers.info.startcode=startCode; % time noting start of fNIRS file
+    markers.manual=true; % times from the PC QPC timer, continuous from the session start 
         % manual marker values are subtracted from this
 	
     if(~useStrSplit) %faster but more error prone
@@ -816,18 +1028,11 @@ function markers=importManualMrkFile(mrkid,startCode,useStrSplit)
 end
 
 
-function markers=importMrkFile(mrkid,mrkSrcID)
+function markers=importMrkFile(mrkid)
 
-    % Marker format should be
-
-    % t = time from start time/elapsed time
-    % marker value
-    % marker duration
-    % marker source (optional)
-
-    if(nargin<2)
-        mrkSrcID=0;
-    end
+    % Columns are read as time (s), marker code, duration (s), then any
+    % further columns (e.g. amplitude) as written. COBI Studio writes a
+    % non-decreasing integer in the third column, not a duration.
 	frewind(mrkid);
 	for i=1:5
 		   lineF=fgetl(mrkid);
@@ -875,10 +1080,6 @@ function markers=importMrkFile(mrkid,mrkSrcID)
        markers.data=[markers.data;mrkLine];
     end
 
-    if(size(markers.data,1)>0)
-        markers.data(:,end+1)=mrkSrcID;
-    end
-    
 	fclose(mrkid);
 end
 
