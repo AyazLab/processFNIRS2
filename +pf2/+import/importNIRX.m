@@ -149,6 +149,8 @@ pathname=folderDIR(1:end-length(filename));
 % recordings does not mix them
 [~,recRoot]=fileparts(filename);
 recRoot=regexprep(recRoot,'_config$','');
+recordingSuffixes=['^(\.(hdr|nirs|snirf|wl\d+|evt|inf|set|tpl|dat|avg|zip|roh|tri)' ...
+    '|_(config\.(hdr|json|txt)|description\.json|probeInfo\.mat|calibration\.json|lsl\.tri))$'];
 
 curdir=cd;
 cdCleanup = onCleanup(@() cd(curdir));
@@ -166,8 +168,10 @@ end
 x=0;
 for i=1:length(d)
     nm=d(i).name;
-    belongs=strcmp(nm,'digpts.txt')||(strncmp(nm,recRoot,numel(recRoot))&&numel(nm)>numel(recRoot)&& ...
-        any(nm(numel(recRoot)+1)=='._'));
+    % Exact root plus a NIRx recording-file suffix, so another recording
+    % whose name extends this root (rec_2.hdr for rec.hdr) is not read
+    belongs=strcmp(nm,'digpts.txt')||(strncmp(nm,recRoot,numel(recRoot))&& ...
+        ~isempty(regexpi(nm(numel(recRoot)+1:end),recordingSuffixes,'once')));
     if(~d(i).isdir&&belongs)
         x=x+1;
         files(x,1)={d(i).name};

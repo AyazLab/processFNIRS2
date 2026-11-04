@@ -25,9 +25,11 @@ end
 
 mt = pf2_base.normalizeMarkers(data.markers);
 % Onsets are seconds from the first sample, as in the .snirf written by
-% pf2.export.asSNIRF (time from 0 at the first sample)
+% pf2.export.asSNIRF (time from 0 at the first sample; origin 0 when the
+% time vector does not match the data, as asSNIRF does)
 origin = 0;
-if isfield(data, 'time') && ~isempty(data.time)
+timeMatchesData = ~isfield(data, 'raw') || numel(data.time) == size(data.raw, 1);
+if isfield(data, 'time') && ~isempty(data.time) && timeMatchesData
     tFinite = data.time(isfinite(data.time));
     if ~isempty(tFinite)
         origin = tFinite(1);

@@ -15,9 +15,12 @@ function tf = timebaseMatches(data, time)
 %   time - Time vector to check [N x 1]
 %
 % Outputs:
-%   tf - true when data.info.timebase has fs, nSamples and medianStep, the
-%        sample count equals nSamples and the median step of time equals
-%        medianStep (relative tolerance 1e-9)
+%   tf - true when data.info.timebase has fs and a time signature (sample
+%        count, span time(end)-time(1), median step) that the time vector
+%        still matches (relative tolerance 1e-9). The signature does not
+%        change when the time is shifted (setT0), but resampling or cutting
+%        changes it, including a resample to the same length on a regular
+%        grid.
 %
 % See also: pf2_base.nirCounterTimebase, pf2.import.importNIR
 
@@ -27,9 +30,19 @@ if ~isstruct(data) || ~isfield(data, 'info') || ~isstruct(data.info) ...
     return;
 end
 tb = data.info.timebase;
-if ~all(isfield(tb, {'fs', 'nSamples', 'medianStep'})) || isempty(time) || numel(time) < 2
+if ~isfield(tb, 'fs') || isempty(time) || numel(time) < 2
     return;
 end
-step = median(diff(time(:)));
-tf = numel(time) == tb.nSamples && abs(step - tb.medianStep) <= 1e-9 * abs(tb.medianStep);
+time = double(time(:));
+sig = [numel(time), time(end) - time(1), median(diff(time))];
+if isfield(tb, 'timeSignature') && numel(tb.timeSignature) == 3
+    ref = tb.timeSignature(:)';
+elseif all(isfield(tb, {'nSamples', 'medianStep'}))
+    ref = [tb.nSamples, NaN, tb.medianStep];   % older QC without a span
+else
+    return;
+end
+ok = abs(sig - ref) <= 1e-9 * max(abs(ref), 1);
+ok(isnan(ref)) = true;
+tf = all(ok);
 end

@@ -374,6 +374,31 @@ classdef NirCounterTimebaseTest < matlab.unittest.TestCase
         end
     end
 
+    methods (Test, TestTags = {'Import', 'NIR', 'Timebase', 'Review'})
+        function testNoUsableCounterKeepsPCRate(testCase)
+            % All counters zero or NaN: the PC times and their rate are kept
+            pc = (0:299)' * 0.2 + 3;
+            counter = zeros(300, 1);
+            counter(100) = NaN;
+            [t, tb] = pf2_base.nirCounterTimebase(pc, counter, 'Model', '2000M');
+            testCase.verifyEqual(t, pc);
+            testCase.verifyEqual(tb.fs, 5, 'AbsTol', 1e-9);
+        end
+
+        function testTimebaseMatchesSignature(testCase)
+            % A same-length resample onto a regular grid at the median step
+            % no longer matches; a shifted time vector (setT0) still does
+            rec = testCase.synthRun('Tick', 33/32768, 'Fs', 5, 'Duration', 600);
+            [t, tb] = pf2_base.nirCounterTimebase(rec.pc, rec.counter, 'Model', '2000M');
+            data.info.timebase = tb;
+            testCase.verifyTrue(pf2_base.timebaseMatches(data, t));
+            testCase.verifyTrue(pf2_base.timebaseMatches(data, t - 12.5));
+            regular = t(1) + (0:numel(t)-1)' * median(diff(t));
+            testCase.verifyFalse(pf2_base.timebaseMatches(data, regular));
+            testCase.verifyFalse(pf2_base.timebaseMatches(data, t(1:end-1)));
+        end
+    end
+
     methods (Access = private)
         function rec = synthRun(~, varargin)
             % SYNTHRUN Synthetic recording with known true sample times

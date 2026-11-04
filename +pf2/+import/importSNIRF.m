@@ -267,7 +267,8 @@ if isfield(data, 'time')
     if isfield(metaDataTags, 'SamplingRate')
         fNIR.fs = str2double(string(metaDataTags.SamplingRate));
     end
-    if ~isfinite(fNIR.fs) || fNIR.fs <= 0
+    fsFromTag = isfinite(fNIR.fs) && fNIR.fs > 0;
+    if ~fsFromTag
         fNIR.fs = 1/nanmedian(diff(fNIR.time));
     end
 else
@@ -283,6 +284,15 @@ end
 
 % Set metadata
 fNIR.info = metaDataTags;
+% The SamplingRate tag is the authoritative rate (e.g. a counter-timed .nir
+% whose median step differs from 1/fs). Record the time vector it belongs
+% to, so device setup keeps it until the data are resampled or cut
+% (pf2_base.timebaseMatches)
+if exist('fsFromTag', 'var') && fsFromTag && numel(fNIR.time) >= 2
+    tt = double(fNIR.time(:));
+    fNIR.info.timebase = struct('method', 'snirf', 'fs', fNIR.fs, 'nSamples', numel(tt), ...
+        'medianStep', median(diff(tt)), 'timeSignature', [numel(tt), tt(end) - tt(1), median(diff(tt))]);
+end
 
 % Build the canonical marker dictionary. Stim condition names provide a
 % code->label mapping (so labels survive an asSNIRF round-trip); a BIDS
@@ -350,9 +360,12 @@ end
 
 % Optode labels may load as a char matrix (fixed-width strings), a string
 % array or a cellstr; use a column cellstr
+lblCounts = struct('sourceLabels', NaN, 'detectorLabels', NaN);
+if isfield(probeInfo, 'sourcePos3D'), lblCounts.sourceLabels = size(probeInfo.sourcePos3D, 1); end
+if isfield(probeInfo, 'detectorPos3D'), lblCounts.detectorLabels = size(probeInfo.detectorPos3D, 1); end
 for lblField = {'sourceLabels', 'detectorLabels'}
     if isfield(probeInfo, lblField{1})
-        probeInfo.(lblField{1}) = toLabelCell(probeInfo.(lblField{1}));
+        probeInfo.(lblField{1}) = toLabelCell(probeInfo.(lblField{1}), lblCounts.(lblField{1}));
     end
 end
 
@@ -900,6 +913,7 @@ end
 % Import auxiliary data if available
 if isfield(nirs, 'aux') && ~isempty(nirs.aux)
     fNIR.Aux = struct();
+    auxOwnTime = {};
     
     for i = 1:length(nirs.aux)
         auxItem = nirs.aux(i);
@@ -915,9 +929,11 @@ if isfield(nirs, 'aux') && ~isempty(nirs.aux)
         fNIR.Aux.(fieldName) = struct();
         fNIR.Aux.(fieldName).data = auxItem.dataTimeSeries;
         
-        % Add time if available
+        % Add time if available (an inherited fNIR.time already has the
+        % time origin restored)
         if isfield(auxItem, 'time')
             fNIR.Aux.(fieldName).time = auxItem.time;
+            auxOwnTime{end+1} = fieldName; %#ok<AGROW>
         else
             fNIR.Aux.(fieldName).time = fNIR.time;
         end
@@ -927,11 +943,11 @@ if isfield(nirs, 'aux') && ~isempty(nirs.aux)
             fNIR.Aux.(fieldName).unit = auxItem.dataUnit;
         end
     end
-    % Aux times follow the restored time origin (see TimeOrigin above)
+    % Aux signals with their own time follow the restored time origin (see
+    % TimeOrigin above)
     if exist('tOrigin', 'var') && isfinite(tOrigin) && tOrigin ~= 0
-        auxNames = fieldnames(fNIR.Aux);
-        for ai = 1:numel(auxNames)
-            fNIR.Aux.(auxNames{ai}).time = fNIR.Aux.(auxNames{ai}).time + tOrigin;
+        for ai = 1:numel(auxOwnTime)
+            fNIR.Aux.(auxOwnTime{ai}).time = fNIR.Aux.(auxOwnTime{ai}).time + tOrigin;
         end
     end
 end
@@ -1310,9 +1326,14 @@ end
 end
 
 
-function c = toLabelCell(v)
+function c = toLabelCell(v, n)
 % TOLABELCELL Labels as a trimmed column cellstr
+%   A fixed-width char matrix may hold one label per row or per column; n,
+%   the expected number of labels, decides which
 if ischar(v)
+    if nargin > 1 && isfinite(n) && size(v, 1) ~= n && size(v, 2) == n
+        v = v';
+    end
     c = cellstr(v);
 elseif isstring(v)
     c = cellstr(v(:));

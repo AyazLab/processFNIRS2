@@ -101,6 +101,8 @@ function [t, tb] = nirCounterTimebase(pc, counter, varargin)
 %                           belongs to the first PC frame
 %          .nSamples      - Number of samples timed
 %          .medianStep    - Median of diff(t) (s)
+%          .timeSignature - [N, t(end)-t(1), medianStep], used by
+%                           pf2_base.timebaseMatches
 %          .pieces        - Table, one row per piece: FirstRow, LastRow,
 %                           CounterSegment, PCFrame, Tick, TickSource
 %                           ('fit'|'pooled'|'default'|'snapped'|
@@ -489,7 +491,10 @@ tb.model = model;
 tb.defaultTick = defaultTick;
 tb.pooledTick = pooledTick;
 tb.tick = bulkTick;
-if abs(bulkTick / (33/32768) - 1) <= 1e-3
+if ~any(isCounterPiece) || ~any(inPiece)
+    % No usable counter steps: the PC times are kept, so is their rate
+    tb.fs = 1 ./ median(diff(t));
+elseif abs(bulkTick / (33/32768) - 1) <= 1e-3
     tb.fs = 1 / (bulkTick * countsPerSample);
 else
     % Median sample step, computed as for a PC-timed file, so 1 ms counters
@@ -502,6 +507,7 @@ tb.frames = frames;
 tb.t0Shift = -frameOffset(1);
 tb.nSamples = N;
 tb.medianStep = median(diff(t));
+tb.timeSignature = [N, t(end) - t(1), tb.medianStep];   % see pf2_base.timebaseMatches
 tb.gaps = gaps;
 tb.latency = latency;
 tb.pcTime = pc;
@@ -698,6 +704,7 @@ tb.frames = table();
 tb.t0Shift = 0;
 tb.nSamples = N;
 tb.medianStep = NaN;
+tb.timeSignature = [N, NaN, NaN];
 tb.gaps = table();
 tb.latency = zeros(N, 1);
 tb.pcTime = pc;

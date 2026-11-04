@@ -1197,9 +1197,10 @@ function [data, stim, aux, nFilled, nGaps] = rebaseAndFillGaps(data, stim, aux, 
         nGaps = numel(gapIdx);
         missing = max(round(dt(gapIdx) / period) - 1, 1);
         % Fill only steps close to a whole number of periods (missed
-        % samples); a long step from timing jitter is marked, not filled
+        % samples); a long step from timing jitter is marked, not filled,
+        % unless every gap is to be filled (MaxFillSamples Inf)
         wholeSteps = abs(dt(gapIdx) / period - (missing + 1)) <= 0.25;
-        doFill = missing <= maxFill & wholeSteps;
+        doFill = missing <= maxFill & (wholeSteps | isinf(maxFill));
         gapStim = [t(gapIdx), dt(gapIdx), zeros(nGaps, 1)];
         if any(~doFill)
             warning('pf2:asSNIRF:unfilledGaps', ...
