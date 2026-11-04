@@ -21,6 +21,8 @@ NIRx import and SNIRF export follow-ups: vendor geometry, NIRStar recordings wit
 
 ### Fixes
 
+- `pf2.export.asSNIRF` builds `MeasurementDate`, `MeasurementTime`, `UnixTime` and `AcquisitionStartTime` from one integer millisecond count. Rounding to the millisecond as a double could leave a value such as 8.0079999 s, which the time format truncated, so `MeasurementTime` and `UnixTime` could differ by 1 ms.
+- `pf2_base.tests.unit.NirCounterTimebaseTest/testNoTimeColumnWarnedOnce` no longer depends on running first in the session: it checks that a second recording does not warn again instead of resetting the once-per-session flag.
 - `pf2.import.importNIR` builds the time base of COBI Studio Modern files from the device sample counter (`pf2_base.nirCounterTimebase`):
   - The counter was read as 1 kHz. On the 2000M it ticks at 32768/33 Hz, so time ran 0.70% fast (about 25 s per hour) and fs came out 5.025 Hz instead of 5.000 Hz. The tick is now fitted per segment as the lower envelope of PC time against the counter (segments of 600 s or more; shorter ones use the pooled tick, else 33/32768 s on the 2000M and 1 ms on the 2000S and 3000C). On a short recording without a 600 s segment, a fit more than 1000 ppm from the default (a missing or wrong model) is warned and used.
   - On the 2000S and 3000C the counter only indexes samples at 1 ms per count. A fit within 50 ppm is kept at exactly 1 ms, and the first piece of each counter segment is anchored at its first sample with the earlier arithmetic, so their times and rates are unchanged when there are no counter resets.

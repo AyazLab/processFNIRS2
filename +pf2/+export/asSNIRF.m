@@ -627,6 +627,17 @@ function out = stripPath(val, isPathField)
     end
 end
 
+function [dateStr, timeStr, unixStr] = msStrings(msTotal)
+    % MSSTRINGS Date, time and Unix-time text from integer milliseconds since
+    %   1970-01-01 (UTC numbers), so all three agree to the millisecond
+    sec = floor(msTotal / 1000);
+    ms = msTotal - sec * 1000;
+    dt = datetime(sec, 'ConvertFrom', 'posixtime', 'TimeZone', 'UTC');
+    dateStr = char(datetime(dt, 'Format', 'yyyy-MM-dd'));
+    timeStr = sprintf('%s.%03d', char(datetime(dt, 'Format', 'HH:mm:ss')), ms);
+    unixStr = sprintf('%d.%03d', sec, ms);
+end
+
 function [dt, hasClock] = toDatetime(val)
     % TODATETIME Parse a datetime or ISO-style date/time string; [] if not parseable
     dt = [];
@@ -730,7 +741,6 @@ function metaData = info2meta(nirStruct, timeZone, includeIdentifying, timeOrigi
         % Start of the first sample, rounded to the millisecond once so the
         % written date/time and UnixTime agree
         t0 = t0 + seconds(timeOrigin);
-        t0.Second = round(t0.Second * 1000) / 1000;
         % A t0 without a zone is the device's wall-clock time. Its zone comes
         % from the TimeZone option; it is never taken from this machine.
         if isempty(t0.TimeZone) && ~isempty(timeZone)
@@ -740,10 +750,21 @@ function metaData = info2meta(nirStruct, timeZone, includeIdentifying, timeOrigi
                 error('pf2:asSNIRF:badTimeZone', 'Invalid TimeZone ''%s'': %s', timeZone, e.message);
             end
         end
-        metaData.MeasurementDate = c2v(char(datetime(t0, 'Format', 'yyyy-MM-dd')));
+        % Every date/time tag is built from one integer millisecond count, so
+        % MeasurementTime and UnixTime cannot differ by a rounding step (a
+        % rounded double such as 8.4399999 s would format as .439)
+        if isempty(t0.TimeZone)
+            wall = t0;
+            wall.TimeZone = 'UTC';                 % wall-clock fields as UTC numbers
+            msTotal = round(posixtime(wall) * 1000);
+        else
+            msTotal = round(posixtime(t0) * 1000);  % absolute instant
+        end
+        [dateStr, timeStr, unixStr] = msStrings(msTotal);
+        metaData.MeasurementDate = c2v(dateStr);
         if hasClock
             if isempty(t0.TimeZone)
-                metaData.MeasurementTime = c2v(char(datetime(t0, 'Format', 'HH:mm:ss.SSS')));
+                metaData.MeasurementTime = c2v(timeStr);
                 warning('pf2:asSNIRF:noTimeZone', ...
                     ['Recording start time has no time zone; MeasurementTime is written ' ...
                      'without a UTC offset and UnixTime is omitted. Pass ''TimeZone'' ' ...
@@ -752,13 +773,10 @@ function metaData = info2meta(nirStruct, timeZone, includeIdentifying, timeOrigi
                 % Date and time are written in UTC (+00:00): some readers
                 % (MNE) drop the offset and would misplace a local time.
                 % MeasurementTimeZone keeps the recording's zone.
-                t0utc = t0;
-                t0utc.TimeZone = 'UTC';
-                metaData.MeasurementDate = c2v(char(datetime(t0utc, 'Format', 'yyyy-MM-dd')));
-                metaData.MeasurementTime = c2v(char(datetime(t0utc, 'Format', 'HH:mm:ss.SSSxxx')));
+                metaData.MeasurementTime = c2v([timeStr '+00:00']);
                 metaData.MeasurementTimeZone = c2v(t0.TimeZone);
-                metaData.AcquisitionStartTime = c2v(sprintf('%.3f', posixtime(t0)));
-                metaData.UnixTime = c2v(sprintf('%.3f', posixtime(t0)));
+                metaData.AcquisitionStartTime = c2v(unixStr);
+                metaData.UnixTime = c2v(unixStr);
             end
         end
     end

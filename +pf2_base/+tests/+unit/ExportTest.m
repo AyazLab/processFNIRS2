@@ -559,6 +559,25 @@ classdef ExportTest < matlab.unittest.TestCase
             testCase.verifyFalse(ismember('MeasurementDate', {info.Datasets.Name}));
         end
 
+        function testExportSNIRFTimeTagsAgreeToTheMillisecond(testCase)
+            % MeasurementTime and UnixTime come from one integer millisecond
+            % count; a start at 8.008 s formatted as .007 before
+            data = testCase.RawData;
+            data.t0 = datetime(2026, 1, 1, 10, 0, 8);
+            data.time = data.time - data.time(1) + 0.008;
+            filepath = testCase.createTempPath('.snirf');
+            pf2.export.asSNIRF(data, filepath, 'TimeZone', 'UTC');
+            testCase.verifyEqual(char(h5read(filepath, '/nirs/metaDataTags/MeasurementTime')), '10:00:08.008+00:00');
+            testCase.verifyEqual(char(h5read(filepath, '/nirs/metaDataTags/UnixTime')), '1767261608.008');
+            testCase.verifyEqual(char(h5read(filepath, '/nirs/metaDataTags/AcquisitionStartTime')), '1767261608.008');
+
+            filepath2 = testCase.createTempPath('.snirf');
+            prev = warning('off', 'pf2:asSNIRF:noTimeZone');
+            testCase.addTeardown(@() warning(prev));
+            pf2.export.asSNIRF(data, filepath2);
+            testCase.verifyEqual(char(h5read(filepath2, '/nirs/metaDataTags/MeasurementTime')), '10:00:08.008');
+        end
+
         function testExportSNIRFTimeOrigin(testCase)
             % Time is written from 0 at the first sample; TimeOrigin keeps
             % the original time of that sample, MeasurementTime describes it,
