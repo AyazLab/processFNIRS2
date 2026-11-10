@@ -150,7 +150,7 @@ end
 if(isfield(fNIRstruct,'info')&&isfield(fNIRstruct.info,'header')&&...
     isfield(fNIRstruct.info.header,'current'))
         current=fNIRstruct.info.header.current;
-    fprintf(fid,'Current:\t%.0f\n',current);
+    fprintf(fid,'Current:\t%s\n',regexprep(sprintf('%g, ',current),', $',''));
 else
  fprintf(fid,'Current:\t	99\n');
 end
@@ -158,7 +158,7 @@ end
 if(isfield(fNIRstruct,'info')&&isfield(fNIRstruct.info,'header')&&...
     isfield(fNIRstruct.info.header,'gains'))
         gains=fNIRstruct.info.header.gains;
-    fprintf(fid,'Gains:\t%.0f\n',gains);
+    fprintf(fid,'Gains:\t%s\n',regexprep(sprintf('%g, ',gains),', $',''));
 else
  fprintf(fid,'Gains:\t99\n');
 end

@@ -270,6 +270,48 @@ classdef ImportNIRTest < matlab.unittest.TestCase
         end
     end
 
+    methods (Test, TestTags = {'Header'})
+        function testHeaderCurrentAndGainsSingleValue(testCase)
+            % TESTHEADERCURRENTANDGAINSSINGLEVALUE Single-value header lines parse
+            %
+            % Older .nir files list one LED current and one gain value.
+
+            h = testCase.Data.info.header;
+            testCase.verifyEqual(h.current, 15);
+            testCase.verifyEqual(h.gains, 5);
+        end
+
+        function testHeaderTwoValueLists(testCase)
+            % TESTHEADERTWOVALUELISTS Two-value Current/Gains lines keep both values
+            %
+            % The short-separation sample lists a long and a short-separation
+            % value on each line.
+
+            nirFile = fullfile(testCase.ProjectRoot, 'sampledata', 'sampleNIR_ss.nir');
+            data = pf2.import.importNIR(nirFile, '', false);
+            testCase.verifyEqual(data.info.header.current, [30 1]);
+            testCase.verifyEqual(data.info.header.gains, [5 1]);
+        end
+
+        function testHeaderListsRoundTrip(testCase)
+            % TESTHEADERLISTSROUNDTRIP Full Current/Gains lists survive export and import
+            %
+            % COBI Studio Modern can write four long-separation LED currents (one
+            % per quadrant) and two short-separation ones, and one gain per
+            % optode, as comma-separated lists; all values must be kept.
+
+            data = testCase.Data;
+            data.info.header.current = [5 5 10 20 1 1];
+            data.info.header.gains = [1 3 2 1 2 1 3 1 3 3 20 20 20 20 20 20 1 2];
+            outFile = [tempname '.nir'];
+            cleanup = onCleanup(@() deleteIfPresent(outFile));
+            pf2.export.asNIR(data, outFile);
+            back = pf2.import.importNIR(outFile, '', false);
+            testCase.verifyEqual(back.info.header.current, data.info.header.current);
+            testCase.verifyEqual(back.info.header.gains, data.info.header.gains);
+        end
+    end
+
     methods (Test, TestTags = {'Robustness'})
         function testRawDataNoNaN(testCase)
             % TESTRAWDATANONAN Verify raw data contains no NaN values
@@ -294,4 +336,12 @@ classdef ImportNIRTest < matlab.unittest.TestCase
                 'Raw data should not contain Inf values');
         end
     end
+end
+
+
+function deleteIfPresent(f)
+% DELETEIFPRESENT Remove a temporary file if it exists
+if exist(f, 'file') == 2
+    delete(f);
+end
 end

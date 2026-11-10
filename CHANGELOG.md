@@ -1,5 +1,14 @@
 # Changelog
 
+## v1.2.3 (2026-11-10)
+COBI `.nir` header LED current and detector gain lists are read and written in full.
+
+### Fixes
+
+- `pf2.import.importNIR` reads every value on the `.nir` `Current:` and `Gains:` header lines; only the first value was kept. COBI Studio Modern writes comma-separated lists there: LED current as four long-separation values (one per quadrant) followed by two short-separation values, and gain as one value per optode, or each as one long-separation and one short-separation value. `info.header.current` and `info.header.gains` are now row vectors, with one element for single-value files.
+- `pf2.export.asNIR` writes the full `Current:` and `Gains:` lists back as comma-separated values (it wrote a single value), formatted without `compose` so the writer also runs under GNU Octave.
+- `pf2_base.tests.unit.ImportNIRTest` checks single-value header lines, the two-value lines of the short-separation sample, and an export and reimport of the full lists.
+
 ## v1.2.2 (2026-11-04)
 NIRx import and SNIRF export follow-ups: vendor geometry, NIRStar recordings without a `.nirs` file, recording start times, SNIRF compliance and gaps, and the COBI `.nir` sample-counter time base.
 

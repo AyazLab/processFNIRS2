@@ -251,9 +251,14 @@ while(ischar(lineF))
     elseif(~isempty(strfind(lineF, 'Freq Code:')))
         header.freqCode=sscanf(lineF,'Freq Code:\t%f\n',1);  %record frequency code
     elseif(~isempty(strfind(lineF, 'Current:')))
-        header.current=sscanf(lineF,'Current:\t%f\n',1);  %record LED current used
+        % LED current, comma-separated: four long-separation values (one per
+        % quadrant) then two short-separation values (e.g. "30, 30, 30, 30,
+        % 1, 1"); some files list one value, or one long and one short
+        header.current=sscanf(strrep(extractAfter(lineF,'Current:'),',',' '),'%f')';
     elseif(~isempty(strfind(lineF, 'Gains:')))
-        header.gains=sscanf(lineF,'Gains:\t%f\n',1);  %record Detector Gain used
+        % detector gain, comma-separated: one per optode, or one or two
+        % values in the same forms as Current
+        header.gains=sscanf(strrep(extractAfter(lineF,'Gains:'),',',' '),'%f')';
     elseif(~isempty(strfind(lineF, 'Other:')))
         header.other=sscanf(lineF,'Other:\t%s\n',1);  %record Detector Gain used
     elseif(~isempty(strfind(lineF,'Start Time:')))
